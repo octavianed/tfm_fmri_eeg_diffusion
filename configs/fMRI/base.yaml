@@ -1,0 +1,164 @@
+# Base configuration shared by all experiments.
+# Experiment configs use `_base_: [base.yaml]` and override only what changes.
+# Override any field from the CLI: --set training.lr=5e-5 --set dataset.subject_selection=all
+
+project:
+  name: fmri_visual_decoding
+  seed: 42
+
+paths:
+  data_dir: data
+  processed_dir: data/processed
+  features_dir: data/features
+  splits_dir: data/splits
+  output_dir: outputs
+
+runtime:
+  device: auto            # auto | cuda | cpu | mps
+  precision: float16
+  deterministic: false
+
+dataset:
+  name: nsd_algonauts_2023
+  # Root that contains either train_data/ + test_data/ (official layout) or the
+  # subjNN/ folders directly (flat layout). The layout is auto-detected.
+  root_dir: C:/Users/xxdia/Documents/Datasets/NSD_Algonauts_2023
+  train_dirname: train_data      # subfolder with training subjects (official layout)
+  test_dirname: test_data        # subfolder with the released test fMRI + images
+  subject_selection: subj01      # subj01 | [subj01, subj02] | all
+  use_hemispheres: [lh, rh]
+  rois: all_visual
+  # 'official' uses test_data/ (released test fMRI) as the test split — the
+  #   standard held-out Algonauts test. Requires test_data to exist.
+  # 'internal' carves train/val/test from the labeled training data instead
+  #   (use this if you only have training fMRI).
+  test_split: official
+  val_ratio: 0.1                 # val is always carved from the training data
+  test_ratio: 0.1                # only used when test_split=internal
+  split_seed: 42
+  norm_eps: 1.0e-6
+
+features:
+  clip_model: ViT-L-14          # open_clip name; ViT-L-14/openai -> 768-d
+  clip_pretrained: openai
+  clip_hf_name: openai/clip-vit-large-patch14   # transformers fallback
+  image_size: 224
+  precompute_clip: true
+  precompute_batch_size: 64
+  precompute_vae: true
+  vae_model: stable-diffusion-v1-5/stable-diffusion-v1-5
+  vae_image_size: 512
+  vae_batch_size: 16
+  vae_scaling_factor: 0.18215
+  pca_dim: 512
+
+model:
+  use_lowlevel: false
+  use_subject_adapter: null     # null -> auto (on when >1 subject)
+  subject_adapter:
+    common_dim: 4096
+  fmri_encoder:
+    hidden_dim: 4096
+    output_dim: 2048
+    dropout: 0.2
+    voxel_dropout: 0.1
+    num_res_blocks: 2
+    input_layernorm: true
+  clip_head:
+    output_dim: 768
+    hidden_dim: null
+    dropout: 0.0
+    final_layernorm: false
+  lowlevel_head:
+    output_dim: 512
+    hidden_dim: null
+    dropout: 0.0
+
+training:
+  batch_size: 64
+  epochs: 100
+  lr: 1.0e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  scheduler: cosine             # cosine | linear | none
+  warmup_ratio: 0.02
+  grad_clip: 1.0
+  mixed_precision: true
+  early_stopping_patience: 10
+  num_workers: 4
+  log_every: 50
+
+losses:
+  lambda_cosine: 1.0
+  lambda_contrastive: 1.0
+  lambda_lowlevel: 0.25
+  lambda_nmse: 0.0
+  temperature: 0.07
+
+checkpointing:
+  enabled: true
+  save_last: true
+  save_best: true
+  save_every_n_epochs: 1
+  keep_last_n: 3
+  keep_first_n: 0               # always keep the first N epochs (0,1,...) — never pruned
+  resume: null                  # null | "auto" | path to a .pt
+  strict_load: true
+  save_rng_state: true
+  monitor: val_top5             # val_loss | val_top1 | val_top5 | val_top10 | val_mean_cosine
+
+evaluation:
+  conditions: [correct, permuted, zero]
+  ridge_alpha: 1000.0
+  noise_std: 1.0
+  infer_batch_size: 256
+
+generation:
+  sd_model: stable-diffusion-v1-5/stable-diffusion-v1-5
+  adapter_scheduler: cosine        # o "none" para desactivarlo
+  adapter_warmup_ratio: 0.05       # 5% de los pasos totales en warm-up
+  mode: adapter                 # adapter | lowlevel_img2img | adapter_lowlevel
+  num_inference_steps: 50
+  guidance_scale: 3.0
+  strength: 0.8
+  prompt_mode: empty
+  num_samples: 16
+  seed: 123
+  num_tokens: 77
+  enable_attention_slicing: true
+  enable_vae_slicing: true
+  cpu_offload: false
+  # Skip loading SD's CLIP text encoder (used only for the empty negative prompt).
+  # false = skip + zero negative (robust across transformers/diffusers versions);
+  # true = load it and use the real empty-string embedding (needs compatible versions).
+  load_text_encoder: false
+  # token-adapter training (only trainable module; UNet stays frozen)
+  train_adapter: false
+  adapter_epochs: 20
+  adapter_batch_size: 4
+  adapter_lr: 1.0e-4
+  adapter_hidden: 1024
+  adapter_resume: null
+  # Periodic epoch_XXXX.pt snapshots of the adapter, so its trajectory can be
+  # compared (not just last/best) — training loss alone is a noisy, unreliable
+  # proxy for generation quality (see docs/03_...md). best/last are never pruned.
+  adapter_save_every_n_epochs: 5
+  adapter_keep_last_n: 5
+  adapter_keep_first_n: 3         # always keep epochs 0,1,2 (early adapters often generate best)
+  # --- Optional adapter-training improvements (both OFF by default) ---
+  # Feature 1: average the diffusion loss over N random timesteps per sample
+  # (1 = original behaviour). Higher = less noisy loss, but N extra frozen-UNet
+  # forwards per batch (more VRAM/time). Try 2-4.
+  adapter_timesteps_per_sample: 1
+  # Feature 2: every N epochs, generate a few held-out images with the current
+  # adapter and score them by CLIP similarity to the real image, and pick
+  # best.pt by that (a direct proxy of generation quality) instead of the loss.
+  adapter_eval_enabled: false
+  adapter_eval_every_n_epochs: 5
+  adapter_eval_num_samples: 6
+  adapter_eval_steps: 25          # diffusion steps during eval (fewer = faster)
+  adapter_eval_split: val         # split to draw the held-out eval images from
+  adapter_eval_guidance_scale: null   # null -> reuse generation.guidance_scale
+  # How best.pt is chosen: auto (clip_sim if eval on, else loss) | loss | clip_sim
+  adapter_select_by: auto
+  grad_checkpointing: true

@@ -1,0 +1,13 @@
+# Experiment 5 — final generative comparison: correct vs permuted vs zero.
+_base_: [base.yaml]
+
+experiment:
+  name: exp05_v4f2_ep0_adapter
+
+generation:
+  # Where Experiment 4 wrote its generated images / metadata.
+  source_experiment: exp04_v4f2_ep0_adapter
+  conditions: [correct, permuted, zero]
+  compute_ssim: true        # requires scikit-image
+  compute_lpips: true       # requires the lpips package
+  num_case_examples: 5       # best / median / worst grids

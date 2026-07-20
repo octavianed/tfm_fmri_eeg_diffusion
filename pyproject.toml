@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fmri-visual-decoding"
+version = "0.1.0"
+description = "fMRI (NSD Algonauts 2023) visual decoding and reconstruction — TFM"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "pyyaml",
+    "tqdm",
+    "matplotlib",
+    "Pillow",
+    "torch>=2.0",
+    "torchvision",
+    "open_clip_torch",
+    "transformers>=4.30",
+    "diffusers>=0.25",
+    "accelerate",
+    "safetensors",
+]
+
+[project.optional-dependencies]
+metrics = ["scikit-image", "lpips"]
+
+[tool.setuptools.packages.find]
+include = ["src*"]

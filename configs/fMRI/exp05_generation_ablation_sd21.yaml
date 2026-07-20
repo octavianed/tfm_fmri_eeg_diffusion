@@ -1,0 +1,13 @@
+# Variante SD 2.1 del Experimento 5 (comparación generativa final).
+#
+# Exp5 no toca Stable Diffusion directamente (solo compara con CLIP las imágenes ya
+# generadas), así que el único cambio real es apuntar a la carpeta de salida de
+# exp04_generation_sd21 en vez de la de SD-1.5. El resto (conditions, compute_ssim,
+# compute_lpips, num_case_examples) se hereda tal cual de exp05_generation_ablation.yaml.
+_base_: [exp05_generation_ablation.yaml]
+
+experiment:
+  name: exp05_generation_ablation_sd21   # -> outputs/exp05_generation_ablation_sd21/
+
+generation:
+  source_experiment: exp04_generation_sd21

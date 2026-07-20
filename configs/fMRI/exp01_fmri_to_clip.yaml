@@ -1,0 +1,12 @@
+# Experiment 1 — fMRI -> CLIP image embedding (no Stable Diffusion loaded).
+_base_: [base.yaml]
+
+experiment:
+  name: exp01_fmri_to_clip
+
+model:
+  use_lowlevel: false
+
+checkpointing:
+  monitor: val_top5
+  resume: null          # set to "auto" to resume from checkpoints/last.pt

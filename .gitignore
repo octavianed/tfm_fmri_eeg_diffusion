@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Data, features, model weights and experiment outputs (large / regenerable)
+data/raw/
+data/processed/
+data/features/
+data/splits/
+outputs/**/checkpoints/
+outputs/**/generated/
+outputs/**/embeddings/
+outputs/**/lowlevel/
+*.pt
+*.pth
+*.npy
+*.npz
+*.pkl
+
+# Keep the folder structure
+!.gitkeep
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

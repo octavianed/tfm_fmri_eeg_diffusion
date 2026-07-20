@@ -1,0 +1,32 @@
+# Core
+numpy
+pandas
+scipy
+scikit-learn
+pyyaml
+tqdm
+matplotlib
+Pillow
+
+# Deep learning (install the CUDA build of torch that matches your driver:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 )
+#torch>=2.0
+#torchvision
+#torch==2.11.0+cu130
+#torchvision==0.26.0+cu130
+
+# Frozen encoders / generator
+open_clip_torch
+#transformers>=4.30
+transformers==5.6.2
+#diffusers>=0.25
+diffusers==0.37.1
+#accelerate
+accelerate==1.13.0
+#safetensors
+safetensors==0.7.0
+
+
+# Optional generation metrics (Experiment 5)
+scikit-image      # SSIM
+lpips             # LPIPS

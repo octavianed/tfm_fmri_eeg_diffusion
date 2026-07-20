@@ -1,0 +1,35 @@
+# Variante SD 2.1 del experimento `exp04_generation_sd21`, tras añadir un scheduler y warmup al adapter (para que no se descontrole al principio del entrenamiento).
+_base_: [exp04_generation.yaml]
+
+experiment:
+  name: exp04_generation_sd21_v2   # -> outputs/exp04_generation_sd21/ (carpeta propia,
+                                 # checkpoints del adapter separados de los de SD-1.5)
+training:
+  early_stopping_patience: 15
+  
+generation:
+  mode: adapter                 # adapter | lowlevel_img2img | adapter_lowlevel
+  sd_model: Manojb/stable-diffusion-2-1-base
+  # El TokenAdapter de SD-1.5 NO sirve aquí: la U-Net de SD-2.1 tiene
+  # cross_attention_dim=1024 (768 en SD-1.5), así que sus capas de salida tienen
+  # tamaño distinto. Al usar un experiment.name nuevo, adapter_last.pt/adapter_best.pt
+  # se guardan en outputs/exp04_generation_sd21/checkpoints/, una carpeta separada de
+  # la de SD-1.5, así que "adapter_resume: auto" (heredado) es seguro: no encontrará
+  # nada la primera vez y reanudará SU PROPIO adapter en sesiones posteriores.
+  adapter_checkpoint: null
+  # El decoder debe ser la variante _sd21 de Exp3: su LowLevelHead se entrenó contra
+  # el espacio latente/PCA de SD-2.1. Si en algún momento cambias a mode: adapter
+  # (semántica pura, sin rama low-level) podrías usar en su lugar cualquier decoder
+  # con cabeza CLIP (p. ej. outputs/exp01_fmri_to_clip/checkpoints/best.pt).
+  decoder_checkpoint: outputs/exp03_lowlevel_multitask_sd21/checkpoints/best.pt
+  adapter_scheduler: cosine        # o "none" para desactivarlo
+  adapter_warmup_ratio: 0.05       # 5% de los pasos totales en warm-up
+  adapter_batch_size: 16 # vs los 4 del experimento anterior
+  #guidance_scale: 5.0
+
+
+features:
+  # Obligatorio SIEMPRE que cambies generation.sd_model, sea cual sea el "mode":
+  # train_token_adapter entrena la pérdida de difusión contra estos latentes
+  # (vae_latent_path), así que deben venir del MISMO VAE que la U-Net de generación.
+  vae_model: Manojb/stable-diffusion-2-1-base

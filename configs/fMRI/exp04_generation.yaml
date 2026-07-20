@@ -1,0 +1,29 @@
+# Experiment 4 — generation with a frozen Stable Diffusion pipeline.
+_base_: [base.yaml]
+
+experiment:
+  name: exp04_generation
+
+model:
+  use_lowlevel: true         # multitask decoder is used as the source model
+
+training:
+  early_stopping_patience: 15
+
+generation:
+  mode: lowlevel_img2img              # adapter | lowlevel_img2img | adapter_lowlevel
+  # Source decoder checkpoint (fMRI -> CLIP/low). Defaults resolved by the
+  # script to exp03 best, then exp01 best, if left null.
+  decoder_checkpoint: null
+  adapter_checkpoint: null
+  # Train the (only) trainable module — the token adapter — before generating.
+  train_adapter: true
+  adapter_epochs: 25
+  adapter_batch_size: 4
+  adapter_resume: auto
+  num_samples: 16
+  num_inference_steps: 50
+  guidance_scale: 3.0
+  prompt_mode: empty
+  seed: 123
+  split: test

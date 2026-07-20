@@ -1,0 +1,14 @@
+# Experiment 2 — retrieval ablation: fMRI correct vs permuted vs zero.
+# Evaluation-only: loads the Experiment 1 checkpoint and evaluates the controls.
+_base_: [base.yaml]
+
+experiment:
+  name: exp02_retrieval_ablation
+
+evaluation:
+  # Which experiment's best.pt to evaluate (resolved to outputs/<name>/checkpoints/best.pt).
+  source_experiment: exp01_fmri_to_clip
+  checkpoint: null            # or an explicit path, overrides source_experiment
+  split: test
+  conditions: [correct, permuted, zero, noise]
+  run_baselines: true         # also compute mean + ridge baselines
