@@ -1,0 +1,156 @@
+# Base configuration for the EEG line (THINGS-EEG2).
+# Mirrors configs/fMRI/base.yaml but with dataset.modality=eeg, an EEG temporal-
+# conv encoder and per-channel normalization. The visual targets (CLIP, VAE, PCA)
+# and the whole downstream stack (heads, losses, ablation, generation) are the
+# SAME as the fMRI line — only the dataset and encoder differ.
+# Experiment configs use `_base_: [base.yaml]` and override only what changes.
+# Override any field from the CLI: --set dataset.channels=63 --set training.batch_size=128
+
+project:
+  name: eeg_visual_decoding
+  seed: 42
+
+paths:
+  data_dir: data
+  processed_dir: data/processed
+  features_dir: data/features
+  splits_dir: data/splits
+  output_dir: outputs
+
+runtime:
+  device: auto            # auto | cuda | cpu | mps
+  precision: float16
+  deterministic: false
+
+dataset:
+  modality: eeg                  # selects the EEG datamodule + temporal-conv encoder
+  name: things_eeg2
+  root_dir: C:/Users/xxdia/Documents/Datasets/THINGS-EEG2
+  subject_selection: sub-01      # sub-01 | [sub-01, sub-08] | all
+  channels: 17                   # 17 (default occipito-parietal montage) | 63 (full, 'stim' dropped)
+  time_window_ms: null           # null = full epoch (100 samples); e.g. [0, 800] to crop
+  # Per-split trial handling. THINGS-EEG2 has 4 reps/image (train) and 80 (test).
+  #   none = one sample per (image, repetition) — training augmentation.
+  #   mean = one sample per image (mean over reps) — clean, high-SNR retrieval.
+  # Eval/ablation always run at the image level (see src/data/eeg_datamodule.py).
+  trial_aggregation:
+    train: none
+    val: mean
+    test: mean
+  val_ratio: 0.1                 # val is carved from the training images (by image)
+  split_seed: 42
+  norm_eps: 1.0e-6
+
+features:
+  clip_model: ViT-L-14          # same CLIP target as the fMRI line -> 768-d
+  clip_pretrained: openai
+  clip_hf_name: openai/clip-vit-large-patch14
+  image_size: 224
+  precompute_clip: true
+  precompute_batch_size: 64
+  precompute_vae: true
+  vae_model: stable-diffusion-v1-5/stable-diffusion-v1-5
+  vae_image_size: 512
+  vae_batch_size: 16
+  vae_scaling_factor: 0.18215
+  pca_dim: 512
+
+model:
+  encoder_type: eeg_temporalconv   # eeg_temporalconv (this line) | fmri (MLP)
+  use_lowlevel: false
+  use_subject_adapter: false       # EEG: per-subject normalization handles subjects
+  eeg_encoder:
+    in_channels: 17               # kept in sync with dataset.channels for reference;
+    in_times: 100                 # actual (C, T) are taken from the datamodule
+    hidden_dim: 256
+    output_dim: 2048              # = fMRI encoder output_dim, so heads/adapter dims match
+    num_res_blocks: 2
+    dropout: 0.3
+    channel_dropout: 0.1
+    pool: attention               # attention | mean
+    kernel_size: 7
+  clip_head:
+    output_dim: 768
+    hidden_dim: null
+    dropout: 0.0
+    final_layernorm: false
+  lowlevel_head:
+    output_dim: 512
+    hidden_dim: null
+    dropout: 0.0
+
+training:
+  batch_size: 256               # EEG trials are small; a larger batch helps InfoNCE
+  epochs: 100
+  lr: 1.0e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  scheduler: cosine             # cosine | linear | none
+  warmup_ratio: 0.02
+  grad_clip: 1.0
+  mixed_precision: true
+  early_stopping_patience: 10
+  num_workers: 0                # EEG arrays live in RAM; workers would duplicate them
+  log_every: 50
+
+losses:
+  lambda_cosine: 1.0
+  lambda_contrastive: 1.0
+  lambda_lowlevel: 0.25
+  lambda_nmse: 0.0
+  temperature: 0.07
+
+checkpointing:
+  enabled: true
+  save_last: true
+  save_best: true
+  save_every_n_epochs: 1
+  keep_last_n: 3
+  keep_first_n: 0
+  resume: null                  # null | "auto" | path to a .pt
+  strict_load: true
+  save_rng_state: true
+  monitor: val_top5             # val_loss | val_top1 | val_top5 | val_top10 | val_mean_cosine
+
+evaluation:
+  conditions: [correct, permuted, zero]
+  ridge_alpha: 1000.0
+  noise_std: 1.0
+  infer_batch_size: 256
+
+generation:
+  sd_model: stable-diffusion-v1-5/stable-diffusion-v1-5
+  adapter_scheduler: cosine
+  adapter_warmup_ratio: 0.05
+  mode: adapter                 # adapter | lowlevel_img2img | adapter_lowlevel
+  num_inference_steps: 50
+  guidance_scale: 3.0
+  strength: 0.8
+  prompt_mode: empty
+  num_samples: 16
+  seed: 123
+  num_tokens: 77
+  enable_attention_slicing: true
+  enable_vae_slicing: true
+  cpu_offload: false
+  load_text_encoder: false
+  train_adapter: false
+  adapter_epochs: 20
+  adapter_batch_size: 4
+  adapter_lr: 1.0e-4
+  adapter_hidden: 1024
+  adapter_resume: null
+  adapter_save_every_n_epochs: 5
+  adapter_keep_last_n: 5
+  adapter_keep_first_n: 3
+  # Feature 1: average the diffusion loss over N random timesteps per sample (1 = off).
+  adapter_timesteps_per_sample: 1
+  # Feature 2: pick adapter best.pt by held-out CLIP generation similarity, not loss.
+  adapter_eval_enabled: false
+  adapter_eval_every_n_epochs: 5
+  adapter_eval_num_samples: 6
+  adapter_eval_steps: 25
+  adapter_eval_split: val
+  adapter_eval_guidance_scale: null
+  adapter_select_by: auto
+  grad_checkpointing: true

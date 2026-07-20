@@ -19,7 +19,7 @@ try:
 except Exception:  # pragma: no cover
     torch = None
 
-from ..data import FmriDataModule, load_image
+from ..data import build_datamodule, load_image
 from ..evaluation.ablation_eval import make_condition_input
 from ..evaluation.eval_data import load_subject_matrices
 from ..features.load_features import inverse_pca_to_latent, load_pca_bundle
@@ -125,7 +125,7 @@ def generate_images(cfg, decoder_checkpoint, adapter_checkpoint=None,
     split = split or str(cfg.get("generation.split", "test"))
     paths = get_experiment_paths(cfg, ensure=True)
     save_config(cfg, paths.root / "config.yaml")
-    dm = FmriDataModule(cfg).prepare()
+    dm = build_datamodule(cfg).prepare()
 
     model, meta = load_decoder(cfg, dm, decoder_checkpoint, device)
     n = int(cfg.get("generation.num_samples", 16))

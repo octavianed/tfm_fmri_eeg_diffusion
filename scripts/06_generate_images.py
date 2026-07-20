@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.data import FmriDataModule  # noqa: E402
+from src.data import build_datamodule  # noqa: E402
 from src.generation import generate_images, train_token_adapter  # noqa: E402
 from src.utils import (get_experiment_paths, get_logger, load_config)  # noqa: E402
 
@@ -49,7 +49,7 @@ def main():
 
     if args.train_adapter or bool(cfg.get("generation.train_adapter", False)):
         log.info("Training token adapter (frozen UNet diffusion loss) ...")
-        dm = FmriDataModule(cfg).prepare()
+        dm = build_datamodule(cfg).prepare()
         info = train_token_adapter(cfg, dm,
                                    resume=cfg.get("generation.adapter_resume"))
         adapter_ckpt = info["adapter_checkpoint"]

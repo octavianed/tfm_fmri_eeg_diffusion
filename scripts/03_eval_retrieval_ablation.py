@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np  # noqa: E402
 
-from src.data import FmriDataModule  # noqa: E402
+from src.data import build_datamodule  # noqa: E402
 from src.evaluation import (conclusion_from_summary, evaluate_ablation,  # noqa: E402
                             evaluate_baselines, save_ablation_figures)
 from src.models import build_model_from_checkpoint  # noqa: E402
@@ -53,7 +53,7 @@ def main():
     log.info("Evaluating checkpoint: %s | split=%s | conditions=%s",
              ckpt, split, conditions)
 
-    dm = FmriDataModule(cfg).prepare()
+    dm = build_datamodule(cfg).prepare()
     model, _ = build_model_from_checkpoint(cfg, ckpt, device, dm.voxel_counts)
 
     result = evaluate_ablation(model, cfg, dm, split=split, conditions=conditions,

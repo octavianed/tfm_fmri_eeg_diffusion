@@ -18,7 +18,7 @@ from typing import Optional, Sequence, Tuple
 
 import pandas as pd
 
-from ..data import FmriDataModule, load_image
+from ..data import build_datamodule, load_image
 from ..evaluation.generation_metrics import compute_generation_metrics
 from ..features.clip_model import load_clip
 from ..utils import get_device, get_experiment_paths, get_logger, load_checkpoint, save_json
@@ -100,7 +100,7 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
             "generation.mode=adapter (or adapter_lowlevel) to sweep "
             "adapter checkpoints meaningfully.", mode)
 
-    dm = FmriDataModule(cfg).prepare()
+    dm = build_datamodule(cfg).prepare()
     model, meta = load_decoder(cfg, dm, decoder_checkpoint, device)
     sample_seed = int(cfg.get("generation.sample_seed", cfg.get("project.seed", 42)))
     selection = select_samples(dm, split, num_samples, sample_seed)

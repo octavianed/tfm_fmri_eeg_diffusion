@@ -29,26 +29,54 @@ class MeanBaseline:
 
 
 class RidgeRegression:
-    """Dual ridge: predict = (X_test X_train^T)(X_train X_train^T + a I)^{-1} Y."""
+    """Regularized linear map, solved in whichever space is cheaper.
+
+    The brain matrix is flattened to 2-D ``[N, D]`` first (a no-op for fMRI, which
+    is already ``[N, V]``; for EEG it flattens ``[N, C, T] -> [N, C*T]`` — the
+    natural linear baseline over channels x time). Then:
+
+    * **primal** (``D <= N``): ``w = (XᵀX + aI)^{-1} Xᵀ Y``; predict ``X_test w``.
+      Cheaper for EEG (``C*T`` features ≪ samples).
+    * **dual** (``D > N``): ``predict = (X_test Xᵀ)(X Xᵀ + aI)^{-1} Y``. Cheaper
+      for fMRI (tens of thousands of voxels ≫ samples), avoids a V×V matrix.
+
+    Both give the same ridge solution, so the fMRI numbers are unchanged.
+    """
 
     def __init__(self, alpha: float = 1000.0):
         self.alpha = float(alpha)
+        self.mode_ = None
         self.x_train_ = None
         self.dual_ = None
+        self.w_ = None
+
+    @staticmethod
+    def _flatten(x) -> np.ndarray:
+        x = np.asarray(x, dtype=np.float64)
+        return x.reshape(x.shape[0], -1)
 
     def fit(self, x_train, y_train):
-        x = np.asarray(x_train, dtype=np.float64)
+        x = self._flatten(x_train)
         y = np.asarray(y_train, dtype=np.float64)
-        n = x.shape[0]
-        gram = x @ x.T
-        gram[np.diag_indices_from(gram)] += self.alpha
-        self.dual_ = np.linalg.solve(gram, y)  # [n, c]
-        self.x_train_ = x
+        n, d = x.shape
+        if d <= n:
+            self.mode_ = "primal"
+            gram = x.T @ x                       # [D, D]
+            gram[np.diag_indices_from(gram)] += self.alpha
+            self.w_ = np.linalg.solve(gram, x.T @ y)      # [D, C]
+        else:
+            self.mode_ = "dual"
+            gram = x @ x.T                       # [N, N]
+            gram[np.diag_indices_from(gram)] += self.alpha
+            self.dual_ = np.linalg.solve(gram, y)         # [N, C]
+            self.x_train_ = x
         return self
 
     def predict(self, x_test):
-        x_test = np.asarray(x_test, dtype=np.float64)
-        return ((x_test @ self.x_train_.T) @ self.dual_).astype(np.float32)
+        x = self._flatten(x_test)
+        if self.mode_ == "primal":
+            return (x @ self.w_).astype(np.float32)
+        return ((x @ self.x_train_.T) @ self.dual_).astype(np.float32)
 
 
 def evaluate_baselines(cfg, datamodule, split: str = "test",

@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.data import FmriDataModule  # noqa: E402
+from src.data import build_datamodule  # noqa: E402
 from src.utils import get_logger, load_config  # noqa: E402
 
 
@@ -22,7 +22,7 @@ def main():
     log = get_logger("prepare")
 
     cfg = load_config(args.config, args.set)
-    dm = FmriDataModule(cfg).prepare(force_rebuild=args.force)
+    dm = build_datamodule(cfg).prepare(force_rebuild=args.force)
 
     log.info("Subjects: %s", dm.subjects)
     log.info("Voxel counts: %s", dm.voxel_counts)
