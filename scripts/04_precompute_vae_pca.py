@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.data import FmriDataModule  # noqa: E402
+from src.data import build_datamodule  # noqa: E402
 from src.features import fit_vae_pca, precompute_vae_latents  # noqa: E402
 from src.utils import get_logger, load_config  # noqa: E402
 
@@ -21,7 +21,7 @@ def main():
     log = get_logger("precompute_vae_pca")
 
     cfg = load_config(args.config, args.set)
-    dm = FmriDataModule(cfg).prepare()
+    dm = build_datamodule(cfg).prepare()
     precompute_vae_latents(cfg, dm, splits=tuple(args.splits),
                            overwrite=args.overwrite)
     summary = fit_vae_pca(cfg, dm, overwrite=args.overwrite)

@@ -17,7 +17,7 @@ try:
 except Exception:  # pragma: no cover
     torch = None
 
-from ..data import FmriDataModule
+from ..data import build_datamodule
 from ..evaluation.embedding_metrics import embedding_regression_metrics
 from ..evaluation.eval_data import load_subject_matrices
 from ..losses import build_loss
@@ -49,7 +49,7 @@ def run_training(cfg, use_lowlevel: bool = False, resume=None) -> dict:
     logger.info("Experiment dir: %s | device: %s | lowlevel: %s",
                 paths.root, device, use_lowlevel)
 
-    dm = FmriDataModule(cfg).prepare()
+    dm = build_datamodule(cfg).prepare()
     clip_dim = tu.peek_feature_dim(cfg, dm, "clip", "train")
     if clip_dim is None:
         raise FileNotFoundError(
