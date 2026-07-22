@@ -1,0 +1,14 @@
+{
+  "correct_vs_permuted": {
+    "mean_diff": 0.004544805735349655,
+    "t_stat": 0.395260751247406,
+    "t_pvalue": 0.6982144713401794,
+    "wilcoxon_pvalue": 0.93988037109375
+  },
+  "correct_vs_zero": {
+    "mean_diff": 0.02038613334298134,
+    "t_stat": 1.3571957349777222,
+    "t_pvalue": 0.1947907656431198,
+    "wilcoxon_pvalue": 0.07391357421875
+  }
+}
