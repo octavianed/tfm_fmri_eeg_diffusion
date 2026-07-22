@@ -1,8 +1,8 @@
 # EEG Experiment 3 — multitask: CLIP head + low-level VAE-PCA head.
-_base_: [base.yaml]
+_base_: [base_17.yaml]
 
 experiment:
-  name: exp03_eeg_lowlevel_multitask
+  name: exp03_17_eeg_lowlevel_multitask
 
 model:
   use_lowlevel: true
