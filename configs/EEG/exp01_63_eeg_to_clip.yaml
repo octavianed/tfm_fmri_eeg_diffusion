@@ -1,0 +1,12 @@
+# EEG Experiment 1 — EEG -> CLIP image embedding (no Stable Diffusion loaded).
+_base_: [base_63.yaml]
+
+experiment:
+  name: exp01_63_eeg_to_clip
+
+model:
+  use_lowlevel: false
+
+checkpointing:
+  monitor: val_top5
+  resume: null          # set to "auto" to resume from checkpoints/last.pt

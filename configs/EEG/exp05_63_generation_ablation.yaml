@@ -1,0 +1,13 @@
+# EEG Experiment 5 — final generative comparison: correct vs permuted vs zero.
+_base_: [base_63.yaml]
+
+experiment:
+  name: exp05_63_eeg_generation_ablation
+
+generation:
+  # Where EEG Experiment 4 wrote its generated images / metadata.
+  source_experiment: exp04_63_eeg_generation
+  conditions: [correct, permuted, zero]
+  compute_ssim: true        # requires scikit-image
+  compute_lpips: true       # requires the lpips package
+  num_case_examples: 5       # best / median / worst grids

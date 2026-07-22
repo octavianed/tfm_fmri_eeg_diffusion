@@ -1,13 +1,13 @@
 # EEG Experiment 2 — retrieval ablation: EEG correct vs permuted vs zero (vs noise).
 # Evaluation-only: loads the EEG Experiment 1 checkpoint and evaluates the controls.
-_base_: [base_17.yaml]
+_base_: [base_63.yaml]
 
 experiment:
-  name: exp02_17_eeg_retrieval_ablation
+  name: exp02_63_eeg_retrieval_ablation
 
 evaluation:
   # Which experiment's best.pt to evaluate (resolved to outputs/<name>/checkpoints/best.pt).
-  source_experiment: exp01_17_eeg_to_clip
+  source_experiment: exp01_63_eeg_to_clip
   checkpoint: null            # or an explicit path, overrides source_experiment
   split: test
   conditions: [correct, permuted, zero, noise]
