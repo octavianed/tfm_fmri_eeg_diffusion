@@ -1,0 +1,13 @@
+# Ablation — filter 0.1–100 → 0.5–40 Hz (spec §8.6).
+# Built FROM THE RAW signal, never by re-filtering the baseline output, so the
+# filter history is comparable across conditions. No notch needed (40 Hz
+# low-pass already removes the 50 Hz line). MVNN recomputed.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: frequency_0_5_40
+
+preprocessing:
+  filter:
+    l_freq_hz: 0.5
+    h_freq_hz: 40.0

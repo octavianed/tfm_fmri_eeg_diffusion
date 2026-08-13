@@ -107,6 +107,18 @@ def metadata_path(cfg, selection_tag: str) -> Path:
     return processed_dir(cfg) / f"metadata_{selection_tag}.csv"
 
 
+def eeg_preproc_dir(cfg, variant: str) -> Path:
+    """Cache root of an own-preprocessing EEG variant built from the raw data.
+
+    Layout: ``data/processed/eeg_preproc/<variant>/<subject>/`` holding
+    ``preprocessed_eeg_{training,test}.npy`` (same contract as the official
+    derivatives) plus ``metadata.json`` and ``qc/``.
+    """
+    d = processed_dir(cfg) / "eeg_preproc" / _safe(variant)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def clip_feature_path(cfg, subject: str, split: str) -> Path:
     model = _safe(cfg.get("features.clip_model", "ViT-L-14"))
     d = features_dir(cfg) / "clip" / model

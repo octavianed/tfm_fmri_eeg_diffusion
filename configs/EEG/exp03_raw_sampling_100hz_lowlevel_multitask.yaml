@@ -1,0 +1,22 @@
+# EEG Experiment 3 (raw sampling_100hz) — multitask: CLIP head + low-level VAE-PCA head.
+_base_: [exp01_raw_sampling_100hz_eeg_to_clip.yaml]
+
+experiment:
+  name: exp03_raw_sampling_100hz_eeg_lowlevel_multitask
+
+model:
+  use_lowlevel: true
+  lowlevel_head:
+    output_dim: 512          # must match features.pca_dim
+
+features:
+  pca_dim: 512
+
+losses:
+  lambda_cosine: 1.0
+  lambda_contrastive: 1.0
+  lambda_lowlevel: 0.25      # configurable weight of the low-level branch
+
+checkpointing:
+  monitor: val_top5
+  resume: null

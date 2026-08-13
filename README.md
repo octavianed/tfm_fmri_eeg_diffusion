@@ -244,3 +244,46 @@ Top-10 ≈ 5%. As with fMRI, EEG is only credited with visual decoding if
 `correct ≫ permuted ≈ zero`; and decoding (Exp 2) is reported separately from
 generation (Exp 5), since EEG may decode in retrieval yet not clearly steer
 generation.
+
+## 11. Own EEG preprocessing from raw (+ ablations)
+
+Besides the official derivatives, the EEG line can start from the **raw 63-channel
+recordings** (`<root>/raw-eeg/`) and apply a parameterized pipeline of our own,
+plus a battery of preprocessing ablations. Full details in
+[docs/05](docs/05_preprocesamiento_eeg_raw_y_ablaciones.md).
+
+Reference configuration (`configs/EEG/preproc/baseline.yaml`): 63 channels,
+0.1–100 Hz on the continuous signal, epoch −200…1000 ms, baseline −200…0 ms,
+250 Hz, half-open crop `[0, 1000)` ms (**exactly 250 samples**), no
+ICA/ASR/CAR/notch, **MVNN fitted on training only and applied to each repetition
+before averaging**, average-4 in training, all 80 test repetitions kept →
+`63 × 250` per image.
+
+Step 09 needs **the project venv's interpreter** (MNE lives there, not in the
+system Python). The baseline pins `preprocessing.filter.backend: mne`, so a wrong
+interpreter fails in ~2 s with an actionable message instead of silently
+degrading to a scipy IIR filter — which would make that variant incomparable
+with the others. The variant cache is also guarded by a config hash: editing a
+preprocessing parameter and re-running without `--force` is refused.
+
+```bash
+.tfm_fmri_diffusion_3_11/Scripts/python.exe scripts/09_preprocess_eeg_raw.py --config configs/EEG/preproc/baseline.yaml
+python scripts/10_validate_eeg_preproc.py  --config configs/EEG/preproc/baseline.yaml
+python scripts/02_train_fmri_to_clip.py    --config configs/EEG/exp01_raw_baseline_eeg_to_clip.yaml
+python scripts/11_eval_test_repetitions.py --config configs/EEG/exp01_raw_baseline_eeg_to_clip.yaml
+```
+
+A variant writes `data/processed/eeg_preproc/<variant>/<subject>/` using the
+**same file contract as the official derivatives**, so the datamodule, encoder
+and Exp1–Exp5 consume it unchanged. Ten one-factor ablations ship as minimal
+overrides (`ablate_mvnn`, `channels_17`, `temporal_100_600`, `temporal_200_400`,
+`sampling_100hz`, `frequency_0_5_40`, `train_independent_trials`,
+`reference_car`, `baseline_minus100`, `baseline_none`), and the test-repetition
+curve (`R = 1…80`) is an evaluation protocol that needs **no retraining**.
+
+**What to re-run when the preprocessing changes:** rebuild the variant (`09`) and
+the metadata (`00`), then retrain Exp1/Exp2/Exp3 and regenerate images + Exp5.
+**CLIP and VAE/PCA features are NOT recomputed** — they depend only on the
+stimulus images, and with an unchanged split they stay aligned by `feat_idx`, so
+they are shared across every variant. The **token adapter is not retrained**
+either: it maps CLIP embeddings to VAE latents and never sees the EEG.

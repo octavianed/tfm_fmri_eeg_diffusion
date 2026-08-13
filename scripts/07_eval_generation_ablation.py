@@ -18,8 +18,9 @@ from PIL import Image  # noqa: E402
 from src.evaluation import compute_generation_metrics  # noqa: E402
 from src.features import load_clip  # noqa: E402
 from src.generation import case_grids, save_comparison_grid  # noqa: E402
-from src.utils import (get_device, get_experiment_paths, get_logger,  # noqa: E402
-                       load_config, load_json, save_json)
+from src.utils import (ExtendOverrides, get_device,  # noqa: E402
+                       get_experiment_paths, get_logger, load_config, load_json,
+                       save_json)
 
 
 def _load_images(folder, image_ids):
@@ -54,7 +55,7 @@ def _paired_tests(per_sample_sim):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--set", nargs="*", default=None)
+    ap.add_argument("--set", nargs="*", action=ExtendOverrides, default=None)
     args = ap.parse_args()
     log = get_logger("eval_generation")
 

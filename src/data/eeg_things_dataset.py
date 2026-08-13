@@ -40,23 +40,40 @@ from .image_transforms import load_image
 _TRAIN, _TEST = "train", "test"
 
 
-def eeg_subject_dir(root_dir, subject: str, channels: int = 17) -> Path:
-    """Resolve the preprocessed folder for a subject and channel variant.
+def eeg_subject_dir(root_dir, subject: str, channels: int = 17,
+                    source: str = "preprocessed", variant_dir=None) -> Path:
+    """Resolve the folder holding a subject's epoched EEG.
 
-    ``channels==63`` uses the ``<sub>__63_channels`` folder; anything else uses
-    the default ``<sub>`` (17-channel) folder.
+    ``source='preprocessed'`` (default, unchanged behaviour) uses the official
+    derivatives: ``channels==63`` → ``<sub>__63_channels``, else ``<sub>``.
+    ``source='raw'`` uses a variant built by :mod:`src.preprocessing` and cached
+    under ``variant_dir/<sub>/`` — same file contract, so nothing else changes.
     """
+    if str(source).lower() == "raw":
+        if variant_dir is None:
+            raise ValueError("source='raw' requires variant_dir "
+                             "(data/processed/eeg_preproc/<variant>)")
+        return Path(variant_dir) / subject
     base = Path(root_dir) / "preprocessed_data"
     name = f"{subject}__63_channels" if int(channels) == 63 else subject
     return base / name
 
 
-def discover_eeg_subjects(root_dir, channels: int = 17) -> List[str]:
-    """List ``sub-NN`` folders present for the requested channel variant."""
+def discover_eeg_subjects(root_dir, channels: int = 17,
+                          source: str = "preprocessed", variant_dir=None) -> List[str]:
+    """List ``sub-NN`` folders available for the requested source/variant."""
+    if str(source).lower() == "raw":
+        base = Path(variant_dir) if variant_dir is not None else None
+        if base is None or not base.exists():
+            raise FileNotFoundError(
+                f"EEG preprocessing variant folder not found: {base}. Build it "
+                f"first with scripts/09_preprocess_eeg_raw.py")
+        return sorted(p.name for p in base.iterdir()
+                      if p.is_dir() and p.name.startswith("sub-"))
+
     base = Path(root_dir) / "preprocessed_data"
     if not base.exists():
         raise FileNotFoundError(f"THINGS-EEG2 preprocessed_data not found: {base}")
-    suffix = "__63_channels" if int(channels) == 63 else ""
     subs = []
     for p in base.iterdir():
         if not p.is_dir():
@@ -70,16 +87,19 @@ def discover_eeg_subjects(root_dir, channels: int = 17) -> List[str]:
     return sorted(set(subs))
 
 
-def resolve_eeg_subjects(root_dir, selection, channels: int = 17) -> List[str]:
-    available = discover_eeg_subjects(root_dir, channels)
+def resolve_eeg_subjects(root_dir, selection, channels: int = 17,
+                         source: str = "preprocessed", variant_dir=None) -> List[str]:
+    available = discover_eeg_subjects(root_dir, channels, source, variant_dir)
     if selection == "all":
         return available
     requested = [selection] if isinstance(selection, str) else list(selection)
     missing = [s for s in requested if s not in available]
     if missing:
+        where = variant_dir if str(source).lower() == "raw" \
+            else Path(root_dir) / "preprocessed_data"
         raise ValueError(
-            f"EEG subjects {missing} not found for channels={channels} under "
-            f"{Path(root_dir) / 'preprocessed_data'} (available: {available}).")
+            f"EEG subjects {missing} not found (source={source}, "
+            f"channels={channels}) under {where} (available: {available}).")
     return sorted(set(requested))
 
 
@@ -100,12 +120,15 @@ class EegSubjectData:
     """
 
     def __init__(self, subject_id: str, root_dir, channels: int = 17,
-                 time_window_ms: Optional[List[float]] = None):
+                 time_window_ms: Optional[List[float]] = None,
+                 source: str = "preprocessed", variant_dir=None):
         self.subject_id = subject_id
         self.root_dir = Path(root_dir)
         self.channels_variant = int(channels)
         self.time_window_ms = time_window_ms
-        self.subj_dir = eeg_subject_dir(root_dir, subject_id, channels)
+        self.source = str(source).lower()
+        self.subj_dir = eeg_subject_dir(root_dir, subject_id, channels,
+                                        source=source, variant_dir=variant_dir)
         self.image_set = self.root_dir / "image_set"
         self._data: Dict[str, np.ndarray] = {}   # source -> [n_img, n_rep, C, T]
         self._ch_names: Optional[List[str]] = None

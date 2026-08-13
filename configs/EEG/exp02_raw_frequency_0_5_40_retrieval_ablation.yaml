@@ -1,0 +1,17 @@
+# EEG Experiment 2 (raw frequency_0_5_40) — retrieval ablation: correct / permuted / zero / noise.
+# Evaluation-only: loads the Experiment 1 checkpoint and evaluates the controls.
+#
+# Inherits the Exp1 config of the SAME variant (not base_63.yaml) so the dataset
+# block can never drift from the data the checkpoint was trained on.
+_base_: [exp01_raw_frequency_0_5_40_eeg_to_clip.yaml]
+
+experiment:
+  name: exp02_raw_frequency_0_5_40_eeg_retrieval_ablation
+
+evaluation:
+  # Which experiment's best.pt to evaluate (outputs/<name>/checkpoints/best.pt).
+  source_experiment: exp01_raw_frequency_0_5_40_eeg_to_clip
+  checkpoint: null            # or an explicit path, overrides source_experiment
+  split: test
+  conditions: [correct, permuted, zero, noise]
+  run_baselines: true         # also compute mean + ridge baselines

@@ -1,0 +1,17 @@
+# Ablation — training repetitions: average-4 → 4 independent examples (§8.7).
+# MVNN is still fitted/applied on individual repetitions first; only the
+# aggregation changes. The image-level split keeps all repetitions of an image
+# in the same split, and test stays at 80-rep averaging to isolate the factor.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: train_independent_trials
+  # per-trial training samples (val/test stay image-level)
+  trial_aggregation:
+    train: none
+    val: mean
+    test: mean
+
+repetitions:
+  train:
+    strategy: independent

@@ -138,12 +138,16 @@ def generate_images(cfg, decoder_checkpoint, adapter_checkpoint=None,
         model, cfg, dm, selection, conditions, split, device, sample_seed)
 
     generator = FrozenSDGenerator(cfg, device=device)
+    adapter_used, adapter_loaded = None, False
     if generator.mode in ("adapter", "adapter_lowlevel"):
         adapter_ck = adapter_checkpoint or cfg.get(
             "generation.adapter_checkpoint",
             str(paths.checkpoints / "adapter_best.pt"))
+        adapter_used = adapter_ck
         if adapter_ck and Path(adapter_ck).exists():
             generator.load_adapter(int(meta["clip_dim"]), adapter_ck)
+            adapter_loaded = True
+            logger.info("Token adapter loaded from %s", adapter_ck)
         else:
             logger.warning("No token adapter at %s; falling back to "
                            "unconditional prompt (rely on img2img init).",
@@ -180,7 +184,11 @@ def generate_images(cfg, decoder_checkpoint, adapter_checkpoint=None,
         "sd_model": str(cfg.get("generation.sd_model", "")),
         "prompt_mode": str(cfg.get("generation.prompt_mode", "empty")),
         "decoder_checkpoint": str(decoder_checkpoint),
-        "adapter_checkpoint": str(adapter_checkpoint or ""),
+        # The RESOLVED adapter (CLI arg -> config -> experiment default), plus
+        # whether it was actually loaded: recording the raw argument would log an
+        # empty string whenever the path came from the config (spec §10.4).
+        "adapter_checkpoint": str(adapter_used or ""),
+        "adapter_loaded": bool(adapter_loaded),
         "image_ids": image_ids,
     }, paths.metadata / "generation_params.json")
     return outputs

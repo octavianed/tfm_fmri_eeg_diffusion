@@ -1,0 +1,12 @@
+# Ablation — no baseline correction (spec §8.10 C).
+# Same epoch, same 0.1–100 Hz filter, same [0,1000) crop; MVNN refitted.
+# Tests how sensitive decoding is to a pre-stimulus window that, under ~5 Hz
+# RSVP, already contains activity from the preceding image.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: baseline_none
+
+preprocessing:
+  baseline:
+    enabled: false

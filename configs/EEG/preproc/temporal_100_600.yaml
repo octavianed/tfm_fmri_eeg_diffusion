@@ -1,0 +1,13 @@
+# Ablation — temporal window 0–1000 → [100, 600) ms (spec §8.3).
+# The epoch still starts at −200 ms so the same baseline can be applied; the
+# crop happens after resampling and MVNN is refitted on this representation.
+# Expected tensor at 250 Hz: 63 × 125.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: temporal_100_600
+
+preprocessing:
+  crop:
+    tmin_ms: 100
+    tmax_ms: 600

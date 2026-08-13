@@ -1,0 +1,14 @@
+# Ablation — 63 → 17 posterior channels (spec §8.2).
+# The 17 channels are selected FROM THE RAW signal (never from the official
+# 17ch/100Hz derivative, which would confound channels + sampling rate).
+# Sampling rate, window, filter and baseline stay at baseline values; a NEW
+# 17 × 17 MVNN is fitted on training only. Expected tensor: 17 × 250.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: channels_17
+  channels: 17                 # informational for source=raw (C comes from the cache)
+
+preprocessing:
+  channels:
+    mode: posterior_17

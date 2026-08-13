@@ -117,7 +117,7 @@ generation:
   enable_vae_slicing: true
   cpu_offload: false
   load_text_encoder: false
-  train_adapter: true
+  train_adapter: false
   adapter_epochs: 20
   adapter_batch_size: 8
   adapter_lr: 0.0001

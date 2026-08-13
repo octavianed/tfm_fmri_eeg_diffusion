@@ -1,0 +1,12 @@
+# Ablation — reference: original → CAR / average (spec §8.9).
+# CAR is applied BEFORE MVNN, and a new MVNN is fitted on the CAR data. CAR
+# makes the spatial matrix rank-deficient, which the Ledoit-Wolf shrinkage plus
+# the eigenvalue floor keep numerically stable.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: reference_car
+
+preprocessing:
+  reference:
+    mode: average
