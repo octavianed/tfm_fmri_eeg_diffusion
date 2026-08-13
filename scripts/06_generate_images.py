@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data import build_datamodule  # noqa: E402
 from src.generation import generate_images, train_token_adapter  # noqa: E402
-from src.utils import (get_experiment_paths, get_logger, load_config)  # noqa: E402
+from src.utils import (get_experiment_paths, ExtendOverrides, get_logger, load_config)  # noqa: E402
 
 
 def resolve_decoder(cfg, explicit):
@@ -33,7 +33,7 @@ def resolve_decoder(cfg, explicit):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--set", nargs="*", default=None)
+    ap.add_argument("--set", nargs="*", action=ExtendOverrides, default=None)
     ap.add_argument("--decoder-checkpoint", default=None)
     ap.add_argument("--adapter-checkpoint", default=None)
     ap.add_argument("--train-adapter", action="store_true")

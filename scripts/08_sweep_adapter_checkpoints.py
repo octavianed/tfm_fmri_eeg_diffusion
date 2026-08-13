@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.generation import discover_adapter_checkpoints, sweep_adapter_checkpoints  # noqa: E402
-from src.utils import get_experiment_paths, get_logger, load_config  # noqa: E402
+from src.utils import ExtendOverrides, get_experiment_paths, get_logger, load_config  # noqa: E402
 
 
 def resolve_decoder(cfg, explicit):
@@ -39,7 +39,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--set", nargs="*", default=None)
+    ap.add_argument("--set", nargs="*", action=ExtendOverrides, default=None)
     ap.add_argument("--decoder-checkpoint", default=None)
     ap.add_argument("--checkpoints", nargs="*", default=None,
                     help="explicit checkpoint paths to sweep (default: "

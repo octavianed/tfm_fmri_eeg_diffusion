@@ -7,6 +7,7 @@ is overlaid on top. CLI overrides (``--set a.b=c``) are applied last.
 """
 from __future__ import annotations
 
+import argparse
 import copy
 import os
 from pathlib import Path
@@ -121,6 +122,33 @@ def apply_overrides(cfg: dict, overrides: "Iterable[str] | None") -> dict:
                 raise ValueError(f"Cannot set '{key}': '{part}' is not a mapping")
         node[parts[-1]] = value
     return cfg
+
+
+class ExtendOverrides(argparse.Action):
+    """argparse action that ACCUMULATES ``--set`` values across repetitions.
+
+    With a plain ``nargs="*"`` argument, ``--set a=1 --set b=2`` silently keeps
+    only the LAST occurrence and drops every earlier override without warning —
+    a nasty failure mode, because the run then quietly uses the wrong dataset or
+    experiment name. This action collects both supported spellings:
+
+        --set a=1 b=2          (one flag, several pairs)
+        --set a=1 --set b=2    (repeated flag)
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        current = list(getattr(namespace, self.dest, None) or [])
+        current.extend(values if isinstance(values, (list, tuple)) else [values])
+        setattr(namespace, self.dest, current)
+
+
+def add_override_arg(parser, flag: str = "--set", help_extra: str = "") -> None:
+    """Register the standard ``--set key.path=value`` override flag on a parser."""
+    parser.add_argument(
+        flag, nargs="*", action=ExtendOverrides, default=None,
+        help=("config overrides as key.path=value; repeatable and/or "
+              "space-separated, e.g. --set training.lr=5e-5 dataset.channels=63"
+              + (f". {help_extra}" if help_extra else "")))
 
 
 def load_config(config_path, overrides: "Iterable[str] | None" = None) -> DotDict:

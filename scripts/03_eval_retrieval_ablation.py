@@ -16,8 +16,8 @@ from src.data import build_datamodule  # noqa: E402
 from src.evaluation import (conclusion_from_summary, evaluate_ablation,  # noqa: E402
                             evaluate_baselines, save_ablation_figures)
 from src.models import build_model_from_checkpoint  # noqa: E402
-from src.utils import (get_device, get_experiment_paths, get_logger,  # noqa: E402
-                       load_config, save_json)
+from src.utils import (ExtendOverrides, get_device,  # noqa: E402
+                       get_experiment_paths, get_logger, load_config, save_json)
 
 
 def resolve_checkpoint(cfg, explicit):
@@ -33,7 +33,7 @@ def resolve_checkpoint(cfg, explicit):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--set", nargs="*", default=None)
+    ap.add_argument("--set", nargs="*", action=ExtendOverrides, default=None)
     ap.add_argument("--checkpoint", default=None)
     ap.add_argument("--split", default=None)
     ap.add_argument("--conditions", nargs="*", default=None)

@@ -8,13 +8,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data import build_datamodule  # noqa: E402
-from src.utils import get_logger, load_config  # noqa: E402
+from src.utils import ExtendOverrides, get_logger, load_config  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--set", nargs="*", default=None,
+    ap.add_argument("--set", nargs="*", action=ExtendOverrides, default=None,
                     help="config overrides, e.g. dataset.subject_selection=all")
     ap.add_argument("--force", action="store_true",
                     help="rebuild metadata + normalization even if cached")

@@ -12,14 +12,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.training import train_clip  # noqa: E402
-from src.utils import get_logger, load_config  # noqa: E402
+from src.utils import ExtendOverrides, get_logger, load_config  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--set", nargs="*", default=None)
+    ap.add_argument("--set", nargs="*", action=ExtendOverrides, default=None)
     ap.add_argument("--resume", nargs="?", const="auto", default=None,
                     help="'--resume' -> auto (last.pt); '--resume PATH' -> explicit")
     args = ap.parse_args()

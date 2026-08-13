@@ -11,10 +11,13 @@ from typing import Dict, Optional, Union
 import torch
 import torch.nn as nn
 
+from ..utils.logging import get_logger
 from .adapters import SubjectAdapters
 from .eeg_encoder import EEGEncoderTemporalConv
 from .fmri_encoder import FMRIEncoder
 from .heads import CLIPHead, LowLevelHead
+
+logger = get_logger("model")
 
 
 class MultitaskDecoder(nn.Module):
@@ -89,6 +92,15 @@ class MultitaskDecoder(nn.Module):
         if self.low_head is not None:
             out["low"] = self.low_head(h)
         return out
+
+
+def _normalize_counts(counts) -> dict:
+    """Comparable form of ``voxel_counts``: fMRI ints vs EEG ``(C, T)`` tuples."""
+    out = {}
+    for k, v in dict(counts).items():
+        out[str(k)] = (tuple(int(x) for x in v)
+                       if isinstance(v, (list, tuple)) else int(v))
+    return out
 
 
 def _batch_subject(subjects) -> Optional[str]:
@@ -179,7 +191,27 @@ def build_model_from_checkpoint(cfg, checkpoint_path, device,
     """
     from ..utils import load_checkpoint
     state = load_checkpoint(checkpoint_path, map_location=device)
-    vc = voxel_counts or state.get("voxel_counts")
+    saved_vc = state.get("voxel_counts")
+    # Guard against evaluating/generating with a differently-shaped input than the
+    # one the checkpoint was trained on. This is silent for EEG (the temporal-conv
+    # encoder pools over time, so a [63, 100] tensor loads the same weights as the
+    # [63, 250] it was trained on) and would quietly produce meaningless metrics —
+    # e.g. pointing an ablation config at the official derivative instead of the
+    # raw variant the decoder was trained on.
+    if voxel_counts is not None and saved_vc is not None:
+        if _normalize_counts(voxel_counts) != _normalize_counts(saved_vc):
+            if not bool(cfg.get("checkpointing.allow_input_shape_mismatch", False)):
+                raise ValueError(
+                    f"Input shape mismatch: the checkpoint {checkpoint_path} was "
+                    f"trained on {saved_vc} but the datamodule provides "
+                    f"{dict(voxel_counts)}. Check dataset.source / "
+                    f"dataset.preproc_variant / dataset.channels in this config — "
+                    f"they must match the run that produced the checkpoint. To "
+                    f"override on purpose set "
+                    f"checkpointing.allow_input_shape_mismatch=true.")
+            logger.warning("Input shape mismatch allowed by config: checkpoint %s "
+                           "vs datamodule %s", saved_vc, dict(voxel_counts))
+    vc = voxel_counts or saved_vc
     if vc is None:
         raise ValueError("voxel_counts not in checkpoint; pass it explicitly.")
     model = build_model(cfg, vc, clip_dim=state.get("clip_dim"),

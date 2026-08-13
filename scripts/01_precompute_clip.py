@@ -8,13 +8,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data import build_datamodule  # noqa: E402
 from src.features import precompute_clip  # noqa: E402
-from src.utils import get_logger, load_config  # noqa: E402
+from src.utils import ExtendOverrides, get_logger, load_config  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--set", nargs="*", default=None)
+    ap.add_argument("--set", nargs="*", action=ExtendOverrides, default=None)
     ap.add_argument("--splits", nargs="*", default=["train", "val", "test"])
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args()

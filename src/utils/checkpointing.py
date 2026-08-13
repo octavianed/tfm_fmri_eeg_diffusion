@@ -24,7 +24,7 @@ from .logging import get_logger
 logger = get_logger("checkpoint")
 
 _LIB_MODULES = ["torch", "torchvision", "numpy", "sklearn", "transformers",
-                "diffusers", "open_clip", "PIL", "scipy", "pandas", "yaml"]
+                "diffusers", "open_clip", "PIL", "scipy", "pandas", "yaml", "mne"]
 
 
 def collect_library_versions() -> dict:
