@@ -8,6 +8,7 @@ from .image_transforms import (build_clip_preprocess, build_display_transform,
 from .algonauts_dataset import AlgonautsDataset, SubjectData, parse_image_id
 from .datamodule import FmriDataModule, SubjectHomogeneousBatchSampler
 from .eeg_normalization import EegNormalizer
+from .eeg_split import image_level_split, train_image_indices
 from .eeg_things_dataset import (EegDataset, EegSubjectData,
                                  discover_eeg_subjects, eeg_selection_tag,
                                  resolve_eeg_subjects)
@@ -22,5 +23,5 @@ __all__ = [
     "parse_image_id", "FmriDataModule", "SubjectHomogeneousBatchSampler",
     "EegNormalizer", "EegDataset", "EegSubjectData", "discover_eeg_subjects",
     "resolve_eeg_subjects", "eeg_selection_tag", "EegDataModule",
-    "build_datamodule",
+    "build_datamodule", "image_level_split", "train_image_indices",
 ]

@@ -25,7 +25,6 @@ namespaced by channel count (spec §7.4).
 from __future__ import annotations
 
 import json
-import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -40,22 +39,18 @@ except Exception:  # pragma: no cover
     torch = None
     DataLoader = None
 
-from ..utils import (clip_feature_path, get_logger, metadata_path, seed_worker,
-                     vae_pca_feature_path)
+from ..utils import (clip_feature_path, eeg_preproc_dir, get_logger,
+                     metadata_path, seed_worker, vae_pca_feature_path)
 from ..utils.paths import processed_dir
 from .datamodule import SubjectHomogeneousBatchSampler
 from .eeg_normalization import EegNormalizer
+from .eeg_split import image_level_split, subject_num as _subject_num
 from .eeg_things_dataset import (EegDataset, EegSubjectData, eeg_selection_tag,
                                  resolve_eeg_subjects)
 
 logger = get_logger("eeg_datamodule")
 
 _DEFAULT_AGG = {"train": "none", "val": "mean", "test": "mean"}
-
-
-def _subject_num(subject: str) -> int:
-    m = re.search(r"(\d+)", subject)
-    return int(m.group(1)) if m else 0
 
 
 class EegDataModule:
@@ -76,12 +71,27 @@ class EegDataModule:
         self.batch_size = int(cfg.get("training.batch_size", 256))
         self.num_workers = int(cfg.get("training.num_workers", 0))
 
+        # 'preprocessed' = official derivatives (default, unchanged behaviour);
+        # 'raw' = a variant built by src.preprocessing from the raw recordings.
+        self.source = str(cfg.get("dataset.source", "preprocessed")).lower()
+        self.variant = str(cfg.get("dataset.preproc_variant", "baseline"))
+        self.variant_dir = (eeg_preproc_dir(cfg, self.variant)
+                            if self.source == "raw" else None)
+        # Per-channel z-score on top of the loaded signal. Default: on for the
+        # official derivatives, OFF for raw variants that already apply MVNN
+        # (the spec forbids an extra z-score after whitening, §3.4).
+        norm = cfg.get("dataset.normalize", None)
+        self.normalize = (bool(norm) if norm is not None
+                          else self.source != "raw")
+
         self.subjects: List[str] = resolve_eeg_subjects(
-            self.root_dir, self.selection, self.channels)
+            self.root_dir, self.selection, self.channels, source=self.source,
+            variant_dir=self.variant_dir)
         self.tag = eeg_selection_tag(self.selection)
         self._subject_data: Dict[str, EegSubjectData] = {
             s: EegSubjectData(s, self.root_dir, channels=self.channels,
-                              time_window_ms=self.time_window_ms)
+                              time_window_ms=self.time_window_ms,
+                              source=self.source, variant_dir=self.variant_dir)
             for s in self.subjects}
 
         self.image_meta: Optional[pd.DataFrame] = None
@@ -102,18 +112,29 @@ class EegDataModule:
             sd = self._subject_data[s]
             self.signal_shape[s] = (sd.channels, sd.n_times)
             self.voxel_counts[s] = (sd.channels, sd.n_times)
-        logger.info("Prepared %d EEG subject(s) %s | channels=%d | signal=%s | "
-                    "agg=%s | images/split: %s", len(self.subjects), self.subjects,
-                    self.channels, self.signal_shape, self.trial_aggregation,
+        src = (f"raw/{self.variant}" if self.source == "raw"
+               else f"official/{self.channels}ch")
+        logger.info("Prepared %d EEG subject(s) %s | source=%s | signal=%s | "
+                    "normalize=%s | agg=%s | images/split: %s",
+                    len(self.subjects), self.subjects, src, self.signal_shape,
+                    self.normalize, self.trial_aggregation,
                     dict(self.image_meta["split"].value_counts()))
         return self
 
+    def _variant_tag(self) -> str:
+        """Namespace for cached metadata/normalization (keeps variants apart)."""
+        if self.source == "raw":
+            return f"eeg_{self.tag}_raw_{self.variant}"
+        return f"eeg_{self.tag}_{self.channels}ch"
+
     def _split_signature(self) -> dict:
         return {"subjects": self.subjects, "val_ratio": self.val_ratio,
-                "split_seed": self.split_seed, "channels": self.channels}
+                "split_seed": self.split_seed, "channels": self.channels,
+                "source": self.source,
+                "variant": self.variant if self.source == "raw" else None}
 
     def _load_or_build_metadata(self, force: bool) -> pd.DataFrame:
-        meta_path = metadata_path(self.cfg, f"eeg_{self.tag}_{self.channels}ch")
+        meta_path = metadata_path(self.cfg, self._variant_tag())
         sig_path = meta_path.with_suffix(".split.json")
         if not force and meta_path.exists() and sig_path.exists():
             saved = json.loads(sig_path.read_text(encoding="utf-8"))
@@ -133,12 +154,9 @@ class EegDataModule:
         for subj in self.subjects:
             sd = self._subject_data[subj]
             n_tr = sd.num_images("train")
-            idx = np.arange(n_tr)
-            rng = np.random.default_rng(self.split_seed + _subject_num(subj))
-            rng.shuffle(idx)
-            n_val = int(round(self.val_ratio * n_tr))
-            assign = {int(i): ("val" if r < n_val else "train")
-                      for r, i in enumerate(idx)}
+            # Shared rule, so the preprocessing pipeline fits MVNN on exactly
+            # the same train images this datamodule calls 'train' (no leakage).
+            assign = image_level_split(n_tr, self.val_ratio, self.split_seed, subj)
             rows.extend(self._image_rows(subj, sd, "train", assign))
             if sd.has_test:
                 n_te = sd.num_images("test")
@@ -169,9 +187,17 @@ class EegDataModule:
     def _norm_path(self, subject: str) -> Path:
         d = processed_dir(self.cfg) / "normalization"
         d.mkdir(parents=True, exist_ok=True)
-        return d / f"{subject}_eeg{self.channels}ch_norm.npz"
+        suffix = (f"raw_{self.variant}" if self.source == "raw"
+                  else f"{self.channels}ch")
+        return d / f"{subject}_eeg{suffix}_norm.npz"
 
     def _load_or_fit_normalization(self, force: bool) -> None:
+        if not self.normalize:
+            # Raw variants already whiten with MVNN; the spec forbids an extra
+            # z-score on top of it (§3.4). Leave the signal untouched.
+            logger.info("Per-channel normalization DISABLED "
+                        "(dataset.normalize=false; MVNN-whitened input).")
+            return
         for subj in self.subjects:
             path = self._norm_path(subj)
             if not force and path.exists():
