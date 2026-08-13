@@ -3,8 +3,14 @@
 Guía operativa para trabajar en este repositorio. Para explicación conceptual y de
 resultados en profundidad, ver `docs/01_objetivos_y_experimentos.md`,
 `docs/02_guia_tecnica_y_resultados.md`, `docs/03_lowlevel_multitarea_y_generacion.md`
-(VAE+PCA, multitarea, métricas y modos de generación) y
-`docs/04_ampliacion_eeg_multimodal.md` (línea EEG / THINGS-EEG2) — orientados al autor del TFM.
+(VAE+PCA, multitarea, métricas y modos de generación),
+`docs/04_ampliacion_eeg_multimodal.md` (línea EEG / THINGS-EEG2) y
+`docs/05_preprocesamiento_eeg_raw_y_ablaciones.md` (pipeline propio desde el EEG raw,
+ablaciones de preprocesamiento y qué reejecutar) y
+`docs/06_tokenadapter_y_generacion.md` (qué espacios conecta el TokenAdapter, con qué se entrena
+y el proceso de generación paso a paso) y
+`docs/07_decoder_cerebro_a_clip.md` (el decoder cerebro→CLIP: Exp1 vs Exp3, encoders por
+modalidad, pérdidas y bucle de entrenamiento) — orientados al autor del TFM.
 
 ## Qué es este proyecto
 
@@ -114,6 +120,70 @@ Ampliación aditiva: la línea fMRI **no cambia de lógica**; EEG entra por un s
   checkpointing y scripts 00–08 son los mismos. Los targets CLIP/VAE se calculan por imagen
   única de THINGS. Rutas de features no colisionan con fMRI (sujetos `sub-01` vs `subj01`).
 
+## Preprocesamiento propio del EEG desde raw (`dataset.source: raw`)
+
+Además del preprocesado **oficial** (`source: preprocessed`, 17|63 canales — sigue siendo el
+**default**, nada cambia), se puede partir del **raw de 63 canales** y aplicar un pipeline propio
+parametrizable + ablaciones. Ver `docs/05_preprocesamiento_eeg_raw_y_ablaciones.md`.
+
+- **Raw**: `raw-eeg/<sub>/ses-0{1..4}/raw_eeg_{training,test}.npy` = dict con `raw_eeg_data`
+  `(64, N)` (**63 EEG + canal `stim`**), `sfreq=1000`, hardware ya filtrado 0.01–100 Hz. ~15 GB
+  por sujeto. Hoy solo está descargado `sub-08`.
+- **Eventos**: canal `stim`, muestras sueltas cuyo valor es el **índice de imagen (1-based)**;
+  `99999` = target/catch (se descarta). ⚠️ **Cada imagen de training aparece en exactamente 2 de
+  las 4 sesiones (2 reps c/u → 4 reps)** con reparto entrelazado; el test son 20 reps/sesión → 80.
+  ⇒ **las repeticiones se agrupan por código de imagen**, NUNCA concatenando sesiones por el eje
+  de repeticiones. Las reps extra se recortan con selección con semilla (como el código oficial).
+- **Baseline** (`configs/EEG/preproc/baseline.yaml`): 63 ch · 0.1–100 Hz · epoch −200…1000 ms ·
+  baseline −200…0 · 250 Hz · crop **half-open** `[0,1000)` (= **250 muestras exactas**, no 251) ·
+  sin ICA/ASR/CAR/notch · **MVNN fit solo con train y aplicado a cada repetición ANTES de
+  promediar** · avg-4 en train · 80 reps guardadas en test → **63×250**.
+- **10 ablaciones** en `configs/EEG/preproc/*.yaml` (overrides mínimos, un factor cada una):
+  `ablate_mvnn`, `channels_17` (17 posteriores **desde el raw**, MVNN 17×17), `temporal_100_600`,
+  `temporal_200_400`, `sampling_100hz`, `frequency_0_5_40` (desde raw, sin encadenar filtros),
+  `train_independent_trials`, `reference_car` (CAR **antes** de MVNN), `baseline_minus100`,
+  `baseline_none`.
+- **Salida = mismo contrato que los ficheros oficiales** (`preprocessed_eeg_data`
+  `[n_img, n_reps, C, T]`, `ch_names`, `times`) en
+  `data/processed/eeg_preproc/<variante>/<sub>/` ⇒ el datamodule/encoder/experimentos **no
+  cambian**. Además `metadata.json` (hash de config, filtro, MVNN, QC, versiones) y `qc/`.
+- **Anti-leakage**: split **por imagen** con función compartida `src/data/eeg_split.py`, usada por
+  el pipeline y por el datamodule ⇒ MVNN se ajusta justo sobre las imágenes que el train llama
+  train. `dataset.normalize: false` en variantes raw (el doc prohíbe z-score sobre MVNN).
+- **Coste**: ~2,1 GB por sujeto-variante; decenas de minutos por sujeto.
+
+⚠️ **El preprocesado raw necesita el python del venv** (MNE solo está ahí; `python` a secas es el
+python base del sistema y NO lo tiene). `preprocessing.filter.backend: mne` está **fijado a
+propósito** en `configs/EEG/preproc/baseline.yaml`: si MNE no está, **falla en 2 s con un mensaje
+accionable** en vez de degradar en silencio a un IIR de scipy (que produciría una variante NO
+comparable con las demás, violando el §3.3). Para desviarte a propósito:
+`--set preprocessing.filter.backend=scipy`.
+
+```
+.tfm_fmri_diffusion_3_11/Scripts/python.exe scripts/09_preprocess_eeg_raw.py --config configs/EEG/preproc/baseline.yaml
+python scripts/10_validate_eeg_preproc.py  --config configs/EEG/preproc/baseline.yaml   # tests §14
+python scripts/02_train_fmri_to_clip.py    --config configs/EEG/exp01_raw_baseline_eeg_to_clip.yaml
+python scripts/11_eval_test_repetitions.py --config configs/EEG/exp01_raw_baseline_eeg_to_clip.yaml  # curva R (no reentrena)
+```
+
+Además, el cache está protegido por **hash de config** (§13): si editas un config de
+preprocesado y reejecutas sin `--force`, el script **se niega** a reutilizar el cache viejo en
+vez de mezclar parámetros en silencio.
+
+### ⚠️ Qué reejecutar al cambiar de preprocesamiento
+
+| Paso | ¿Reejecutar? |
+|---|---|
+| `09` (variante) y `00` (metadata) | **Sí** |
+| `01_precompute_clip` y `04_precompute_vae_pca` | **NO** — dependen solo de las imágenes; mismo set y mismo split ⇒ mismo `feat_idx`. **Se comparten entre todas las variantes** y con la línea oficial |
+| Exp1 (`02`), Exp2 (`03`), Exp3 (`05`) | **Sí** (cambia la entrada cerebral) |
+| **Entrenar el TokenAdapter** (`06`) | **NO** — se entrena con `CLIP → latentes VAE`, no ve el EEG |
+| **Generar imágenes** (`06`) y Exp5 (`07`) | **Sí** |
+
+Condición: no cambiar `dataset.val_ratio`/`split_seed` ni descartar imágenes
+(`repetitions.*.on_missing: fail`). Si cambia (C,T) es otro `experiment.name`, pero **no**
+invalida las features.
+
 ## Mapa de `src/`
 
 - `utils/` — infraestructura: `config` (YAML+`_base_`+overrides), `seed` (RNG), `device`
@@ -123,7 +193,12 @@ Ampliación aditiva: la línea fMRI **no cambia de lógica**; EEG entra por un s
   con mmap; `AlgonautsDataset`), `fmri_normalization`, `datamodule` (`FmriDataModule`: resuelve
   layout/sujetos/splits/normalización/DataLoaders + `SubjectHomogeneousBatchSampler`). EEG:
   `eeg_things_dataset` (`EegSubjectData`/`EegDataset`), `eeg_normalization` (`EegNormalizer`,
-  por canal), `eeg_datamodule` (`EegDataModule`). `factory` (`build_datamodule` por modalidad).
+  por canal), `eeg_datamodule` (`EegDataModule`), `eeg_split` (split por imagen **compartido**
+  con el preprocesado). `factory` (`build_datamodule` por modalidad).
+- `preprocessing/` — pipeline propio EEG desde raw: `things_raw_loader` (layout, eventos del
+  canal `stim`, QC), `filters` (backend MNE|scipy, FIR fase cero + resample antialias),
+  `epoching` (epoch por bloques, baseline, crop half-open), `mvnn` (Ledoit–Wolf en NumPy,
+  verificado contra sklearn), `build_variant` (orquesta y guarda la variante), `qc` (figuras).
 - `features/` — `clip_model` (carga CLIP congelado), `precompute_clip_embeddings`,
   `precompute_vae_latents`, `fit_vae_pca` (PCA solo en train), `load_features`.
 - `models/` — `fmri_encoder` (MLP residual), `eeg_encoder` (`EEGEncoderTemporalConv`, conv
@@ -210,8 +285,14 @@ split, value, seed, checkpoint`.
 ## Entorno
 
 - **venv del proyecto (stack completo GPU)**: `.tfm_fmri_diffusion_3_11\Scripts\python.exe`
-  (torch cu130 + CUDA, diffusers 0.37.1, transformers 5.6.2 — versiones muy nuevas/bleeding-edge).
-  Úsalo para cualquier prueba real que necesite diffusers/open_clip/SD.
+  (torch cu130 + CUDA, diffusers 0.37.1, transformers 5.6.2 — versiones muy nuevas/bleeding-edge;
+  **`mne` 1.12.1** para el preprocesado EEG desde raw). Úsalo para cualquier prueba real que
+  necesite diffusers/open_clip/SD/MNE.
+- ⚠️ **`sklearn` puede fallar de forma intermitente** con
+  `ImportError: DLL load failed while importing arrayfuncs: Una directiva de Control de
+  aplicaciones bloqueó este archivo` (política WDAC del equipo; se observó en
+  `sklearn.covariance`/`linear_model` y luego funcionó). Por eso el MVNN implementa
+  Ledoit–Wolf **en NumPy puro** (validado contra sklearn a ~1e-17) y no depende de él.
 - El **python base** del sistema (3.11.9) tiene solo numpy/pandas/sklearn/pillow + torch CPU
   (instalados para validación ligera): sirve para lógica sin GPU, no para generación real.
 - **pip falla por SSL corporativo**: usa `--trusted-host pypi.org --trusted-host
