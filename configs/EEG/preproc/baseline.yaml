@@ -1,0 +1,104 @@
+# EEG preprocessing BASELINE — own pipeline from the THINGS-EEG2 raw recordings.
+#
+#   63 ch · 0.1–100 Hz · epoch −200…1000 ms · baseline −200…0 ms · 250 Hz ·
+#   crop [0,1000) ms · no ICA/ASR/CAR/notch · MVNN fitted on training only and
+#   applied BEFORE averaging · average-4 in train · all 80 reps kept in test
+#   → final tensor 63 × 250 per image.
+#
+# Build it with:
+#   python scripts/09_preprocess_eeg_raw.py --config configs/EEG/preproc/baseline.yaml
+# Ablations live next to this file and only override what changes.
+# Inherits the 63-channel EEG base (the raw montage has 63 EEG channels).
+_base_: [../base_63.yaml]
+
+dataset:
+  source: raw                  # raw = own pipeline | preprocessed = official derivatives
+  preproc_variant: baseline    # cache: data/processed/eeg_preproc/<variant>/<sub>/
+  subject_selection: all       # all subjects that have raw-eeg available
+  n_train_images: 16540        # THINGS-EEG2 training images (used by the split)
+  normalize: false             # no extra z-score on top of MVNN (spec §3.4)
+
+loading:
+  eeg_channels_expected: 63
+  exclude_target_catch: true
+  legacy_target_code: 99999
+  repetition_selection: seeded_random   # seeded_random (official-like) | first
+
+preprocessing:
+  channels:
+    mode: all_63               # all_63 | posterior_17
+
+  filter:
+    enabled: true
+    l_freq_hz: 0.1
+    h_freq_hz: 100.0
+    notch_hz: null             # no notch in the baseline (spec §3.4, §5.3)
+    # Pinned to 'mne' ON PURPOSE: with 'auto' a missing MNE would silently fall
+    # back to a zero-phase IIR, producing a variant that is NOT comparable with
+    # the FIR-built ones (spec §3.3 requires everything else to stay constant).
+    # Failing loudly is safer. Run with the project venv, which has mne:
+    #   .tfm_fmri_diffusion_3_11/Scripts/python.exe scripts/09_preprocess_eeg_raw.py ...
+    # To deviate deliberately: --set preprocessing.filter.backend=scipy
+    backend: mne               # mne | scipy | auto
+    method: fir
+    phase: zero
+
+  reference:
+    mode: original             # keep the release reference; NO implicit CAR
+
+  epoch:
+    tmin_ms: -200
+    tmax_ms: 1000
+
+  baseline:
+    enabled: true
+    tmin_ms: -200
+    tmax_ms: 0
+
+  resample:
+    sfreq_hz: 250
+
+  crop:
+    tmin_ms: 0
+    tmax_ms: 1000
+    interval: half_open        # [0, 1000) -> exactly 250 samples, never 251
+
+  ica:
+    enabled: false
+  asr:
+    enabled: false
+
+  mvnn:
+    enabled: true
+    fit_on: train_only
+    scope: subject_session
+    covariance: ledoit_wolf
+    eigenvalue_floor: 1.0e-8
+
+repetitions:
+  train:
+    strategy: average          # average (4 reps -> 1 example) | independent
+    n_repetitions: 4
+    on_missing: fail           # fail | truncate  (never average silently)
+  test:
+    strategy: keep             # keep all reps on disk; averaging happens later
+    n_repetitions: 80
+    on_missing: fail
+
+split:
+  validation_level: image      # all repetitions of an image stay together
+  keep_repetitions_together: true
+  val_ratio: 0.1
+  seed: 42
+
+runtime:
+  dtype_output: float32
+  deterministic: true
+
+# The model consumes the cached tensor as-is, so the datamodule must not crop
+# again (the crop already happened in preprocessing).
+evaluation:
+  test_repetitions:
+    values: [1, 2, 4, 8, 20, 40, 80]
+    n_draws: 20
+    seed: 42

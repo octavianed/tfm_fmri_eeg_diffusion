@@ -1,0 +1,12 @@
+# Ablation — narrow window [200, 400) ms (spec §8.4), ATM-like.
+# Interpret with care: under ~5 Hz RSVP the next stimulus starts around 200 ms.
+# Expected tensor at 250 Hz: 63 × 50.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: temporal_200_400
+
+preprocessing:
+  crop:
+    tmin_ms: 200
+    tmax_ms: 400

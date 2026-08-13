@@ -1,0 +1,27 @@
+# EEG Experiment 1 on the OWN-preprocessed raw data (variant: baseline_minus100, 63×250).
+#
+# Ablation §8.10 B: baseline correction window −100…0 ms instead of −200…0.
+#
+# Build the variant first:
+#   .tfm_fmri_diffusion_3_11/Scripts/python.exe scripts/09_preprocess_eeg_raw.py \
+#       --config configs/EEG/preproc/baseline_minus100.yaml
+_base_: [base_63.yaml]
+
+experiment:
+  name: exp01_raw_baseline_minus100_eeg_to_clip
+
+dataset:
+  source: raw                   # raw = own pipeline | preprocessed = official derivatives
+  preproc_variant: baseline_minus100
+  subject_selection: sub-01
+  normalize: false              # MVNN/whitening already applied; no extra z-score (spec §3.4)
+  time_window_ms: null          # the crop already happened during preprocessing
+  # Signal is 63×250; the encoder reads (C, T) from the datamodule, so
+  # model.eeg_encoder.in_channels/in_times are informational only.
+
+model:
+  use_lowlevel: false
+
+checkpointing:
+  monitor: val_top5
+  resume: null

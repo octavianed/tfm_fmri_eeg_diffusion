@@ -1,0 +1,12 @@
+# Ablation — sampling rate 250 → 100 Hz (spec §8.5).
+# Resampling keeps its antialias protection, so the representation cannot carry
+# content above the new 50 Hz Nyquist. MVNN is recomputed for this variant.
+# Expected tensor: 63 × 100.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: sampling_100hz
+
+preprocessing:
+  resample:
+    sfreq_hz: 100

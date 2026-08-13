@@ -1,0 +1,34 @@
+# EEG Experiment 1 on the OWN-preprocessed raw data (variant: train_independent_trials, 63×250).
+#
+# Ablation §8.7: the 4 training repetitions are kept as 4 INDEPENDENT
+# examples instead of being averaged (the cache stores n_reps=4).
+# `trial_aggregation.train: none` is what turns them into 4 samples/image;
+# val/test stay image-level so only the training strategy changes.
+#
+# Build the variant first:
+#   .tfm_fmri_diffusion_3_11/Scripts/python.exe scripts/09_preprocess_eeg_raw.py \
+#       --config configs/EEG/preproc/train_independent_trials.yaml
+_base_: [base_63.yaml]
+
+experiment:
+  name: exp01_raw_train_independent_trials_eeg_to_clip
+
+dataset:
+  source: raw                   # raw = own pipeline | preprocessed = official derivatives
+  preproc_variant: train_independent_trials
+  subject_selection: sub-01
+  normalize: false              # MVNN/whitening already applied; no extra z-score (spec §3.4)
+  time_window_ms: null          # the crop already happened during preprocessing
+  trial_aggregation:            # explicit: this ablation depends on it
+    train: none                 # 4 repetitions -> 4 training examples
+    val: mean
+    test: mean
+  # Signal is 63×250; the encoder reads (C, T) from the datamodule, so
+  # model.eeg_encoder.in_channels/in_times are informational only.
+
+model:
+  use_lowlevel: false
+
+checkpointing:
+  monitor: val_top5
+  resume: null

@@ -1,0 +1,11 @@
+# Ablation — baseline window −200…0 → −100…0 ms (spec §8.10 B).
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: baseline_minus100
+
+preprocessing:
+  baseline:
+    enabled: true
+    tmin_ms: -100
+    tmax_ms: 0

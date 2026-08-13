@@ -1,0 +1,12 @@
+# Ablation — remove MVNN (spec §8.1). Everything else identical to the baseline.
+# NOT replaced by z-score/BatchNorm: that would stop being a clean ablation.
+# Input to the model stays 63 × 250.
+_base_: [baseline.yaml]
+
+dataset:
+  preproc_variant: ablate_mvnn
+  normalize: false          # still no z-score: the ablation must be clean
+
+preprocessing:
+  mvnn:
+    enabled: false

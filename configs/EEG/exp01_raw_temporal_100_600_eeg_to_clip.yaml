@@ -1,0 +1,27 @@
+# EEG Experiment 1 on the OWN-preprocessed raw data (variant: temporal_100_600, 63×125).
+#
+# Ablation §8.3: model window cropped to [100, 600) ms (125 samples @250 Hz).
+#
+# Build the variant first:
+#   .tfm_fmri_diffusion_3_11/Scripts/python.exe scripts/09_preprocess_eeg_raw.py \
+#       --config configs/EEG/preproc/temporal_100_600.yaml
+_base_: [base_63.yaml]
+
+experiment:
+  name: exp01_raw_temporal_100_600_eeg_to_clip
+
+dataset:
+  source: raw                   # raw = own pipeline | preprocessed = official derivatives
+  preproc_variant: temporal_100_600
+  subject_selection: sub-01
+  normalize: false              # MVNN/whitening already applied; no extra z-score (spec §3.4)
+  time_window_ms: null          # the crop already happened during preprocessing
+  # Signal is 63×125; the encoder reads (C, T) from the datamodule, so
+  # model.eeg_encoder.in_channels/in_times are informational only.
+
+model:
+  use_lowlevel: false
+
+checkpointing:
+  monitor: val_top5
+  resume: null

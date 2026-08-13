@@ -1,0 +1,15 @@
+{
+  "decision": "fmri_used",
+  "metric": "retrieval/top5",
+  "subject": "all",
+  "correct": 0.035,
+  "best_control": 0.025,
+  "margin": 1.0,
+  "values": {
+    "correct": 0.035,
+    "permuted": 0.025,
+    "zero": 0.025,
+    "noise": 0.02
+  },
+  "message": "fMRI correcto supera claramente a los controles"
+}

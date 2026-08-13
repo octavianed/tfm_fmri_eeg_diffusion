@@ -1,0 +1,28 @@
+# EEG Experiment 1 on the OWN-preprocessed raw data (variant: reference_car, 63×250).
+#
+# Ablation §8.9: common average reference (CAR) applied BEFORE MVNN,
+# with a new MVNN fitted on the CAR data.
+#
+# Build the variant first:
+#   .tfm_fmri_diffusion_3_11/Scripts/python.exe scripts/09_preprocess_eeg_raw.py \
+#       --config configs/EEG/preproc/reference_car.yaml
+_base_: [base_63.yaml]
+
+experiment:
+  name: exp01_raw_reference_car_eeg_to_clip
+
+dataset:
+  source: raw                   # raw = own pipeline | preprocessed = official derivatives
+  preproc_variant: reference_car
+  subject_selection: sub-01
+  normalize: false              # MVNN/whitening already applied; no extra z-score (spec §3.4)
+  time_window_ms: null          # the crop already happened during preprocessing
+  # Signal is 63×250; the encoder reads (C, T) from the datamodule, so
+  # model.eeg_encoder.in_channels/in_times are informational only.
+
+model:
+  use_lowlevel: false
+
+checkpointing:
+  monitor: val_top5
+  resume: null

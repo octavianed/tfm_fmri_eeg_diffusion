@@ -1,0 +1,27 @@
+# EEG Experiment 4 (raw frequency_0_5_40) — generation with a frozen Stable Diffusion.
+#
+# Inherits the Exp1 config of the SAME variant, so the dataset block cannot drift
+# from the data the decoder was trained on.
+#
+# The token adapter is NOT retrained: it maps CLIP(image) -> VAE(image) and never
+# sees EEG. Reusing ONE frozen adapter across every preprocessing ablation also
+# keeps Exp5 differences attributable to the preprocessing alone (spec §15).
+_base_: [exp01_raw_frequency_0_5_40_eeg_to_clip.yaml]
+
+experiment:
+  name: exp04_raw_frequency_0_5_40_eeg_generation
+
+model:
+  use_lowlevel: true          # decoder from Exp3 (CLIP + low-level heads)
+
+generation:
+  mode: adapter               # adapter | lowlevel_img2img | adapter_lowlevel
+  decoder_checkpoint: outputs/exp03_raw_frequency_0_5_40_eeg_lowlevel_multitask/checkpoints/best.pt
+  train_adapter: false
+  adapter_checkpoint: outputs/exp04_63_eeg_generation/checkpoints/adapter_best.pt
+  num_samples: 16
+  num_inference_steps: 50
+  guidance_scale: 3.0
+  prompt_mode: empty
+  seed: 123
+  split: test

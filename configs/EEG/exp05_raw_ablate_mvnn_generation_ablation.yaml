@@ -1,0 +1,13 @@
+# EEG Experiment 5 (raw ablate_mvnn) — generative comparison: correct vs permuted vs zero.
+_base_: [exp01_raw_ablate_mvnn_eeg_to_clip.yaml]
+
+experiment:
+  name: exp05_raw_ablate_mvnn_eeg_generation_ablation
+
+generation:
+  # Where Experiment 4 of this variant wrote its generated images / metadata.
+  source_experiment: exp04_raw_ablate_mvnn_eeg_generation
+  conditions: [correct, permuted, zero]
+  compute_ssim: true        # requires scikit-image
+  compute_lpips: true       # requires the lpips package
+  num_case_examples: 5      # best / median / worst grids

@@ -1,0 +1,30 @@
+# EEG Experiment 1 on the OWN-preprocessed raw data (variant: baseline, 63×250).
+#
+# Template showing how any Exp1–Exp5 config points at a preprocessing variant.
+# The equivalent without a dedicated file is a CLI override on the usual config:
+#   python scripts/02_train_fmri_to_clip.py --config configs/EEG/exp01_63_eeg_to_clip.yaml \
+#     --set dataset.source=raw --set dataset.preproc_variant=baseline \
+#     --set dataset.normalize=false --set experiment.name=exp01_raw_baseline_eeg_to_clip
+#
+# Build the variant first:
+#   python scripts/09_preprocess_eeg_raw.py --config configs/EEG/preproc/baseline.yaml
+_base_: [base_63.yaml]
+
+experiment:
+  name: exp01_raw_baseline_eeg_to_clip
+
+dataset:
+  source: raw                   # raw = own pipeline | preprocessed = official derivatives
+  preproc_variant: baseline
+  subject_selection: sub-01     # the only subject with raw data downloaded so far
+  normalize: false              # MVNN already whitens; no extra z-score (spec §3.4)
+  time_window_ms: null          # the crop already happened during preprocessing
+  # The signal is 63 × 250; the encoder reads (C, T) from the datamodule, so
+  # model.eeg_encoder.in_channels/in_times are informational only.
+
+model:
+  use_lowlevel: false
+
+checkpointing:
+  monitor: val_top5
+  resume: null

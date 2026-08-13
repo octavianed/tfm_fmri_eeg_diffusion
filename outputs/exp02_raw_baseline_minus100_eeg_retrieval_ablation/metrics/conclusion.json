@@ -1,0 +1,15 @@
+{
+  "decision": "fmri_not_clearly_used",
+  "metric": "retrieval/top5",
+  "subject": "all",
+  "correct": 0.04,
+  "best_control": 0.05,
+  "margin": 1.0,
+  "values": {
+    "correct": 0.04,
+    "permuted": 0.05,
+    "zero": 0.025,
+    "noise": 0.05
+  },
+  "message": "fMRI correcto NO supera claramente a permutado/cero: no se puede afirmar uso de senal cerebral real"
+}
