@@ -211,7 +211,9 @@ invalida las features.
 - `evaluation/` — `retrieval_metrics`, `embedding_metrics`, `eval_data` (matrices por sujeto),
   `baselines` (media + ridge dual), `ablation_eval` (`evaluate_ablation`, `conclusion_...`),
   `generation_metrics`.
-- `generation/` — `sd_pipeline` (`FrozenSDGenerator`, `load_sd_pipeline`, `train_token_adapter`),
+- `generation/` — `input_scale_sweep` (`sweep_adapter_input_scale`, barrido de la intensidad de
+  condicionamiento; `margin_table` compartido en `checkpoint_sweep`),
+  `sd_pipeline` (`FrozenSDGenerator`, `load_sd_pipeline`, `train_token_adapter`),
   `generate_from_fmri` (`generate_images` + helpers públicos `predict_condition_embeddings`,
   `lowlevel_init_images`, `save_condition_images`), `make_grids`, `checkpoint_sweep`
   (`sweep_adapter_checkpoints`, `discover_adapter_checkpoints`).
@@ -261,6 +263,22 @@ split, value, seed, checkpoint`.
     `val_clip_sim`/`best_val_sim`. `adapter_select_by: auto|loss|clip_sim`.
 - `train_token_adapter` y `generate_images` guardan `config.yaml` (config resuelta completa),
   además del `metadata/generation_params.json` (resumen acotado de esa generación).
+- ⚠️ **Norma del CLIP predicho sin calibrar** (ver `docs/06_...md` §2.3 bis/ter): ninguna pérdida
+  de Exp1/Exp3 supervisa la norma (coseno e InfoNCE normalizan), así que deriva por run (medido
+  0,54×–1,39× la real) y actúa como *intensidad de condicionamiento* descontrolada. Dos palancas,
+  ambas **OFF por defecto**:
+  - `generation.rescale_clip_pred: none|train_median|<float>` (**opción A**, sin reentrenar):
+    proyecta `clip_pred` al radio mediano del CLIP real de train. Medido: **no mejora la calidad**
+    (en un run la empeoró, p=0,008) pero **sí hace comparables las variantes** (dif. entre dos
+    variantes 0,023 → 0,007). Úsala al comparar preprocesados entre sí, no para números de calidad.
+  - `generation.adapter_normalize_input: true` + `generation.adapter_input_scale` (**opción B**,
+    **requiere reentrenar el adapter**): el `TokenAdapter` normaliza su entrada → invariante a
+    escala por construcción. El flag se guarda en el checkpoint y `load_adapter` lo respeta
+    (los checkpoints antiguos se leen como `false`; reanudar con el flag cambiado **falla**).
+    Tras reentrenar, elige `adapter_input_scale` con
+    `scripts/12_sweep_adapter_input_scale.py` (prueba varios valores **sin reentrenar**, puntúa por
+    similitud CLIP y **margen** correcto−control): una intensidad mayor que la nominal subió la
+    similitud CLIP. El script falla si el adapter no es invariante (el parámetro se ignoraría).
 - ⚠️ **Cambiar `generation.sd_model` NO basta**: SD-2.1 tiene `cross_attention_dim=1024` (768 en
   1.5) → reentrenar el adapter desde cero; y en modos low-level, `features.vae_model` debe apuntar
   al MISMO modelo y hay que rehacer `04`+`05` (el espacio latente del VAE cambia). El `.pkl` de la

@@ -125,6 +125,23 @@ generation:
   num_samples: 16
   seed: 123
   num_tokens: 77
+  # Calibrate the norm of the PREDICTED CLIP embedding before the adapter.
+  # Neither CLIP loss term constrains the norm, so it drifts per run (measured
+  # 0.54x-1.37x the real one) — which acts like an uncontrolled guidance strength
+  # and confounds generation comparisons across variants. Only affects modes that
+  # use the adapter. none = historical behaviour | train_median = project onto the
+  # median norm of the real TRAIN embeddings (no leakage) | a float = use it as-is.
+  rescale_clip_pred: none
+  # Option B — make the adapter SCALE-INVARIANT by construction: it L2-normalizes
+  # its input, so the decoder's arbitrary predicted norm can no longer act as an
+  # uncontrolled conditioning strength. Requires RETRAINING the adapter; the flag
+  # is stored in the checkpoint so inference can never mismatch it. Makes
+  # rescale_clip_pred (Option A) a no-op.
+  adapter_normalize_input: false
+  # Conditioning strength when the adapter normalizes its input (training always
+  # uses 1.0). Sweep it at inference WITHOUT retraining: a stronger-than-trained
+  # scale measurably raised CLIP similarity in this project (see docs/06 §2.3 bis).
+  adapter_input_scale: 1.0
   enable_attention_slicing: true
   enable_vae_slicing: true
   cpu_offload: false

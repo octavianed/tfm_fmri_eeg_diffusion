@@ -97,17 +97,54 @@ class FrozenSDGenerator:
         self.embeds_dtype = te.dtype if te is not None else self.pipe.unet.dtype
         self.adapter = None
         self._uncond_cache = {}
+        # Optional calibration of the *predicted* CLIP embedding norm before the
+        # adapter (see `rescale_to_norm` in _prompt_embeds). Set by the inference
+        # entry points when generation.rescale_clip_pred is enabled; left None
+        # for the in-loop adapter eval, which already feeds real embeddings.
+        self.rescale_to_norm: Optional[float] = None
 
     # -- adapter -----------------------------------------------------------
     def load_adapter(self, clip_dim: int, checkpoint_path=None):
-        self.adapter = TokenAdapter(
-            clip_dim, cross_dim=self.cross_dim, num_tokens=self.num_tokens,
-            hidden_dim=int(self.cfg.get("generation.adapter_hidden", 1024))
-        ).to(self.device)
+        """Build the adapter and load its weights.
+
+        ``normalize_input`` (Option B) is taken from the **checkpoint** when it
+        records it, so an adapter trained on normalized embeddings can never be
+        run un-normalized (or vice versa) by accident — that mismatch would
+        silently produce garbage conditioning.
+        """
+        cfg_norm = bool(self.cfg.get("generation.adapter_normalize_input", False))
+        normalize_input = cfg_norm
+        state = None
         if checkpoint_path is not None and Path(checkpoint_path).exists():
             state = load_checkpoint(checkpoint_path, map_location=self.device)
+            if "normalize_input" in state:
+                normalize_input = bool(state["normalize_input"])
+                if normalize_input != cfg_norm:
+                    logger.warning(
+                        "generation.adapter_normalize_input=%s but the checkpoint "
+                        "was trained with normalize_input=%s; honouring the "
+                        "checkpoint (they must match).", cfg_norm, normalize_input)
+            else:
+                logger.info("Adapter checkpoint predates Option B (no "
+                            "'normalize_input' key); assuming %s.", cfg_norm)
+
+        self.adapter = TokenAdapter(
+            clip_dim, cross_dim=self.cross_dim, num_tokens=self.num_tokens,
+            hidden_dim=int(self.cfg.get("generation.adapter_hidden", 1024)),
+            normalize_input=normalize_input,
+            input_scale=float(self.cfg.get("generation.adapter_input_scale", 1.0)),
+        ).to(self.device)
+        if state is not None:
             self.adapter.load_state_dict(state["adapter_state_dict"])
             logger.info("Loaded token adapter from %s", checkpoint_path)
+        if normalize_input:
+            logger.info("Adapter is scale-invariant (normalize_input=True, "
+                        "input_scale=%.3f)", self.adapter.input_scale)
+            if self.rescale_to_norm is not None:
+                logger.warning(
+                    "generation.rescale_clip_pred is set but the adapter "
+                    "normalizes its input, so the rescaling has NO effect. Use "
+                    "generation.adapter_input_scale to tune conditioning strength.")
         self.adapter.eval()
         return self.adapter
 
@@ -135,6 +172,16 @@ class FrozenSDGenerator:
         """Build [B, num_tokens, cross_dim] conditioning from CLIP embeddings."""
         clip_embeds = torch.as_tensor(clip_embeds, dtype=torch.float32,
                                       device=self.device)
+        if self.rescale_to_norm is not None:
+            # Neither CLIP loss term constrains the norm, so a decoder's
+            # predictions can sit on a shell of a different radius than the one
+            # the adapter was trained on (real CLIP embeddings have an almost
+            # constant norm). Project onto that radius: keeps the direction —
+            # which carries all the semantics — and removes a scale mismatch
+            # that otherwise acts like an uncontrolled guidance strength and
+            # differs from run to run.
+            norm = clip_embeds.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+            clip_embeds = clip_embeds / norm * float(self.rescale_to_norm)
         if self.adapter is None:
             # no adapter -> unconditional (Option C relies on the img2img init)
             return self._empty_text_embeds(clip_embeds.shape[0]).to(self.embeds_dtype)
@@ -248,9 +295,18 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
     cross_dim = int(unet.config.cross_attention_dim)
     num_tokens = int(cfg.get("generation.num_tokens", 77))
 
+    # Option B: train on L2-normalized CLIP embeddings so the adapter is
+    # scale-invariant by construction. The flag is stored in every checkpoint so
+    # inference can never mismatch it. Training always runs at input_scale=1.0.
+    normalize_input = bool(cfg.get("generation.adapter_normalize_input", False))
     adapter = TokenAdapter(clip_dim, cross_dim=cross_dim, num_tokens=num_tokens,
                            hidden_dim=int(cfg.get("generation.adapter_hidden",
-                                                  1024))).to(device)
+                                                  1024)),
+                           normalize_input=normalize_input).to(device)
+    if normalize_input:
+        logger.info("Training a SCALE-INVARIANT adapter (normalize_input=True): "
+                    "the predicted-norm drift of the decoder can no longer act as "
+                    "an uncontrolled conditioning strength.")
     optimizer = torch.optim.AdamW(
         adapter.parameters(), lr=float(cfg.get("generation.adapter_lr", 1e-4)),
         weight_decay=float(cfg.get("generation.adapter_weight_decay", 0.0)))
@@ -285,6 +341,13 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
         resume_path = Path(resume)
     if resume_path is not None:
         state = load_checkpoint(resume_path, map_location=device)
+        prev_norm = state.get("normalize_input")
+        if prev_norm is not None and bool(prev_norm) != normalize_input:
+            raise ValueError(
+                f"Refusing to resume: the checkpoint was trained with "
+                f"normalize_input={bool(prev_norm)} but the config says "
+                f"{normalize_input}. Mixing both regimes would corrupt training — "
+                f"use a different experiment.name for the other setting.")
         adapter.load_state_dict(state["adapter_state_dict"])
         optimizer.load_state_dict(state["optimizer_state_dict"])
         if scheduler is not None and state.get("scheduler_state_dict"):
@@ -396,6 +459,9 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
                  "epoch": epoch, "global_step": global_step,
                  "best_loss": best_loss, "best_val_sim": best_val_sim,
                  "select_by": select_by, "clip_dim": clip_dim,
+                 # Option B flag: inference MUST use the same setting, so it
+                 # travels with the weights (see FrozenSDGenerator.load_adapter).
+                 "normalize_input": normalize_input,
                  "config": cfg.to_dict() if hasattr(cfg, "to_dict") else dict(cfg)}
         save_checkpoint(state, last_path)
         if is_best:
@@ -412,7 +478,8 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
     return {"adapter_checkpoint": str(best_path if best_path.exists() else last_path),
             "best_loss": best_loss,
             "best_val_sim": None if best_val_sim == float("-inf") else best_val_sim,
-            "select_by": select_by, "clip_dim": clip_dim}
+            "select_by": select_by, "clip_dim": clip_dim,
+            "normalize_input": normalize_input}
 
 
 def _build_adapter_eval_context(cfg, datamodule, unet, device):
