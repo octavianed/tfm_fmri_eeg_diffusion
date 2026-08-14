@@ -22,7 +22,8 @@ except Exception:  # pragma: no cover
 from ..data import build_datamodule, load_image
 from ..evaluation.ablation_eval import make_condition_input
 from ..evaluation.eval_data import load_subject_matrices
-from ..features.load_features import inverse_pca_to_latent, load_pca_bundle
+from ..features.load_features import (clip_norm_reference,
+                                      inverse_pca_to_latent, load_pca_bundle)
 from ..models import build_model_from_checkpoint
 from ..utils import (get_device, get_experiment_paths, get_logger, save_config,
                      save_json)
@@ -118,6 +119,37 @@ def save_condition_images(images, out_dir, image_ids):
     return paths
 
 
+def resolve_clip_rescale(cfg, datamodule, generator=None) -> Optional[float]:
+    """Resolve ``generation.rescale_clip_pred`` into a target norm (or ``None``).
+
+    ``none`` (default) keeps the historical behaviour. ``train_median`` projects
+    every predicted CLIP embedding onto the sphere whose radius is the median
+    norm of the **real** train-split embeddings — the regime the TokenAdapter was
+    trained in. A float value is used verbatim.
+    """
+    mode = cfg.get("generation.rescale_clip_pred", "none")
+    target = None
+    if mode is None or str(mode).lower() in ("none", "off", "false", ""):
+        target = None
+    elif isinstance(mode, (int, float)) and not isinstance(mode, bool):
+        target = float(mode)
+    elif str(mode).lower() in ("train_median", "train_mean"):
+        stat = "mean" if str(mode).lower().endswith("mean") else "median"
+        target = clip_norm_reference(cfg, datamodule.subjects, "train", stat)
+        if target is None:
+            logger.warning("rescale_clip_pred=%s but no train CLIP features "
+                           "found; skipping the rescaling.", mode)
+    else:
+        raise ValueError(f"Unknown generation.rescale_clip_pred: {mode!r}")
+
+    if generator is not None:
+        generator.rescale_to_norm = target
+    if target is not None:
+        logger.info("Calibrating predicted CLIP norm to %.3f (%s) before the adapter",
+                    target, mode)
+    return target
+
+
 def generate_images(cfg, decoder_checkpoint, adapter_checkpoint=None,
                     conditions: Sequence[str] = ("correct", "permuted", "zero"),
                     device=None, split: Optional[str] = None) -> dict:
@@ -138,6 +170,7 @@ def generate_images(cfg, decoder_checkpoint, adapter_checkpoint=None,
         model, cfg, dm, selection, conditions, split, device, sample_seed)
 
     generator = FrozenSDGenerator(cfg, device=device)
+    clip_rescale = resolve_clip_rescale(cfg, dm, generator)
     adapter_used, adapter_loaded = None, False
     if generator.mode in ("adapter", "adapter_lowlevel"):
         adapter_ck = adapter_checkpoint or cfg.get(
@@ -181,6 +214,8 @@ def generate_images(cfg, decoder_checkpoint, adapter_checkpoint=None,
         "num_samples": len(selection), "generation_seed": gen_seed,
         "sample_seed": sample_seed, "guidance_scale": gs,
         "num_inference_steps": steps, "strength": strength,
+        "rescale_clip_pred": cfg.get("generation.rescale_clip_pred", "none"),
+        "clip_pred_target_norm": clip_rescale,
         "sd_model": str(cfg.get("generation.sd_model", "")),
         "prompt_mode": str(cfg.get("generation.prompt_mode", "empty")),
         "decoder_checkpoint": str(decoder_checkpoint),

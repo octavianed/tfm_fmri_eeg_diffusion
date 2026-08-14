@@ -38,5 +38,31 @@ def inverse_pca_to_latent(bundle: dict, pca_vectors: np.ndarray) -> np.ndarray:
     return flat.reshape(-1, *shape).astype(np.float32)
 
 
+def clip_norm_reference(cfg, subjects, split: str = "train",
+                        stat: str = "median") -> Optional[float]:
+    """Typical L2 norm of the **real** CLIP image embeddings (train split only).
+
+    Used to calibrate the scale of *predicted* embeddings before the TokenAdapter
+    (``generation.rescale_clip_pred``). Neither ``clip_pred`` loss term (cosine
+    nor InfoNCE) constrains the norm, so a decoder's predictions can land on a
+    shell of a completely different radius than the one the adapter was trained
+    on — and the radius drifts from run to run, which would confound a
+    generation comparison across preprocessing variants.
+
+    Fitted on ``split='train'`` only, so it introduces no test leakage.
+    Returns ``None`` when no CLIP features are available.
+    """
+    norms = []
+    for subj in subjects:
+        arr = load_split_features(cfg, subj, split, "clip")
+        if arr is None or len(arr) == 0:
+            continue
+        norms.append(np.linalg.norm(np.asarray(arr, dtype=np.float64), axis=1))
+    if not norms:
+        return None
+    alln = np.concatenate(norms)
+    return float(np.median(alln) if stat == "median" else np.mean(alln))
+
+
 def explained_variance(bundle: dict) -> np.ndarray:
     return np.asarray(bundle["explained_variance_ratio"], dtype=float)

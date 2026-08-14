@@ -23,6 +23,7 @@ from ..evaluation.generation_metrics import compute_generation_metrics
 from ..features.clip_model import load_clip
 from ..utils import get_device, get_experiment_paths, get_logger, load_checkpoint, save_json
 from .generate_from_fmri import (load_decoder, lowlevel_init_images,
+                                 resolve_clip_rescale,
                                  predict_condition_embeddings,
                                  save_condition_images, select_samples)
 from .make_grids import save_comparison_grid
@@ -114,6 +115,7 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
     clip_bundle = load_clip(cfg, device)
 
     generator = FrozenSDGenerator(cfg, device=device)
+    clip_rescale = resolve_clip_rescale(cfg, dm, generator)
     gen_seed = int(cfg.get("generation.seed", 123))
     gs = float(cfg.get("generation.guidance_scale", 3.0))
     steps = int(num_inference_steps or cfg.get("generation.num_inference_steps", 50))
@@ -157,6 +159,8 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
     margins.to_csv(out_dir / "checkpoint_sweep_margins.csv", index=False)
     save_json({"mode": mode, "num_samples": len(selection), "num_inference_steps": steps,
               "guidance_scale": gs, "strength": strength, "image_ids": image_ids,
+              "rescale_clip_pred": cfg.get("generation.rescale_clip_pred", "none"),
+              "clip_pred_target_norm": clip_rescale,
               "checkpoints": [{"label": lbl, "path": str(p)} for lbl, p in checkpoints]},
              out_dir / "sweep_params.json")
     save_sweep_figure(summary, out_dir / "checkpoint_sweep_quality.png")
@@ -165,23 +169,46 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
             "out_dir": str(out_dir)}
 
 
-def _margin_table(summary: pd.DataFrame) -> pd.DataFrame:
-    """Per checkpoint: correct's mean CLIP similarity minus the best control's."""
+#: Every negative control the margin must beat (spec §2: correct >> permuted ≈
+#: zero ≈ noise). Ignoring one would *overstate* the margin.
+CONTROL_CONDITIONS = ("permuted", "zero", "noise")
+
+
+def margin_table(summary: pd.DataFrame, key: str = "checkpoint",
+                 carry: Sequence[str] = (), sort_by: Optional[str] = None
+                 ) -> pd.DataFrame:
+    """Per ``key``: correct's mean CLIP similarity minus the BEST control's.
+
+    Encodes the project's falsifiable criterion, so every sweep (checkpoints,
+    adapter input scale, …) applies exactly the same rule. ``carry`` copies extra
+    columns through (e.g. ``epoch``).
+    """
     rows = []
-    for ck in summary["checkpoint"].unique():
-        sub = summary[summary["checkpoint"] == ck]
+    for k in summary[key].unique():
+        sub = summary[summary[key] == k]
         vals = dict(zip(sub["condition"], sub["mean_clip_similarity"]))
         correct = vals.get("correct")
-        controls = [vals[c] for c in ("permuted", "zero") if c in vals]
+        controls = [vals[c] for c in CONTROL_CONDITIONS if c in vals]
         if correct is None or not controls:
             continue
         best_control = max(controls)
-        rows.append({"checkpoint": ck, "epoch": sub["epoch"].iloc[0],
-                    "correct": correct, "best_control": best_control,
+        row = {key: k}
+        for col in carry:
+            row[col] = sub[col].iloc[0]
+        row.update({"correct": correct, "best_control": best_control,
                     "margin": correct - best_control,
                     "uses_fmri_signal": bool(correct > best_control)})
+        rows.append(row)
     df = pd.DataFrame(rows)
-    return df.sort_values("epoch", na_position="last") if len(df) else df
+    if not len(df):
+        return df
+    return df.sort_values(sort_by or key, na_position="last")
+
+
+def _margin_table(summary: pd.DataFrame) -> pd.DataFrame:
+    """Backwards-compatible wrapper used by the checkpoint sweep."""
+    return margin_table(summary, key="checkpoint", carry=("epoch",),
+                        sort_by="epoch")
 
 
 def save_sweep_figure(summary: pd.DataFrame, out_path) -> Optional[str]:
