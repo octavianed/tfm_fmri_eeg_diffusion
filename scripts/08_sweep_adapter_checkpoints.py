@@ -28,7 +28,10 @@ def resolve_decoder(cfg, explicit):
         return ck
     from pathlib import Path
     out = Path(cfg.get("paths.output_dir", "outputs"))
-    for name in ("exp03_lowlevel_multitask", "exp01_fmri_to_clip"):
+    # Includes the renamed fMRI experiment; EEG/multimodal configs set
+    # generation.decoder_checkpoint explicitly, so this is only a fallback.
+    for name in ("exp03_fmri_lowlevel_multitask", "exp03_lowlevel_multitask",
+                 "exp01_fmri_to_clip"):
         cand = out / name / "checkpoints" / "best.pt"
         if cand.exists():
             return cand

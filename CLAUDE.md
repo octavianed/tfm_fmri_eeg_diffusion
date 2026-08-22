@@ -10,7 +10,10 @@ ablaciones de preprocesamiento y qué reejecutar) y
 `docs/06_tokenadapter_y_generacion.md` (qué espacios conecta el TokenAdapter, con qué se entrena
 y el proceso de generación paso a paso) y
 `docs/07_decoder_cerebro_a_clip.md` (el decoder cerebro→CLIP: Exp1 vs Exp3, encoders por
-modalidad, pérdidas y bucle de entrenamiento) — orientados al autor del TFM.
+modalidad, pérdidas y bucle de entrenamiento) y
+`docs/08_ampliacion_multimodal_texto_y_controlnet.md` (prompts textuales + ControlNet:
+las tres arquitecturas de condicionamiento, captions, deltas y qué reejecutar)
+— orientados al autor del TFM.
 
 ## Qué es este proyecto
 
@@ -81,6 +84,15 @@ python scripts/05_train_multitask.py         --config configs/fMRI/exp03_lowleve
 python scripts/06_generate_images.py         --config configs/fMRI/exp04_generation.yaml --train-adapter
 python scripts/07_eval_generation_ablation.py --config configs/fMRI/exp05_generation_ablation.yaml
 python scripts/08_sweep_adapter_checkpoints.py --config configs/fMRI/exp04_generation.yaml  # opcional: elegir checkpoint del adapter por calidad
+```
+
+Pasos adicionales **solo** para la ampliación multimodal (ver `## Ampliación multimodal`):
+
+```
+python scripts/13_precompute_text_embeddings.py       --config configs/fMRI/exp04_generation_text_weak.yaml
+python scripts/14_precompute_controlnet_conditions.py --config configs/fMRI/exp04_generation_controlnet_weak.yaml
+python scripts/15_validate_multimodal.py              --config configs/fMRI/exp04_generation_text_weak.yaml   # tests §41, CPU
+python scripts/16_sweep_controlnet_scale.py           --config configs/fMRI/exp04_generation_controlnet_weak.yaml
 ```
 Para **EEG**, el mismo orden con `configs/EEG/exp0X_*.yaml` (p. ej.
 `scripts/02_train_fmri_to_clip.py --config configs/EEG/exp01_eeg_to_clip.yaml`; el nombre del
@@ -184,23 +196,95 @@ Condición: no cambiar `dataset.val_ratio`/`split_seed` ni descartar imágenes
 (`repetitions.*.on_missing: fail`). Si cambia (C,T) es otro `experiment.name`, pero **no**
 invalida las features.
 
+## Ampliación multimodal (texto + ControlNet)
+
+Aditiva: la generación anterior **no cambia** salvo que se pida otra arquitectura. Ver
+`docs/08_ampliacion_multimodal_texto_y_controlnet.md`.
+
+- **`generation.conditioning_architecture`** (default `legacy_adapter` = comportamiento
+  histórico, checkpoints antiguos del adapter siguen sirviendo):
+  - `legacy_adapter` — solo cerebro: `CLIP_pred → TokenAdapter → prompt_embeds`.
+  - `text_adapter_concat` — `[77 tokens de texto ; K pseudo-tokens]` por concatenación
+    (`[B, 77+K, 768]`; la cross-attention no depende de la longitud).
+  - `text_adapter_concat_controlnet` — lo anterior **+** ControlNet preentrenada y
+    **congelada** alimentada con `low_pred → PCA⁻¹ → VAE decode → Canny`. ControlNet **no**
+    sustituye a la concatenación: añade residuos espaciales.
+- **`conditioning_architecture` y `generation.mode` son ejes ORTOGONALES**: `adapter_lowlevel`
+  (Opción C, img2img desde `low_pred`) se puede combinar con cualquiera de las tres
+  arquitecturas (probado). Los configs nuevos usan `mode: adapter` por **interpretabilidad**,
+  no por incompatibilidad: con `adapter_lowlevel`, `permuted`/`zero` alteran a la vez
+  `clip_pred` y `low_pred`, así que `delta_brain` mide la contribución cerebral **conjunta**
+  en vez de la semántica. Para separarlas está la arquitectura 2 (`semantic_*`/`lowlevel_*`).
+- **Único entrenable, siempre: el `TokenAdapter`.** ControlNet/CLIP/VAE/U-Net/text encoder
+  van congelados. Un adapter por (arquitectura, modo de texto): el checkpoint guarda su
+  identidad de condicionamiento y cargarlo bajo otra **falla** (salvo
+  `generation.allow_incompatible_adapter: true`, solo para smoke tests).
+- **Captions**: `dataset.captions_dir` (default `<root>/auxiliar/generated_captions` en fMRI,
+  `<root>/image_set/generated_captions` en EEG). `generation.text.mode: none|weak|oracle` →
+  fMRI `prompt_categories`/`primary_caption`, EEG `primary_caption` en ambos ⇒ **en EEG
+  `oracle == weak`** (indícalo en las tablas; no entrenes dos adapters).
+- **Prompt**: `"Image of {caption}"`. Se normalizan espacios/puntuación, **nunca** se reescribe.
+- **Texto permutado**: derangement de Sattolo con semilla 42 **dentro de (sujeto, split) y de
+  la misma familia de caption** (`permutation_source: derived`, default). NO se usa la columna
+  `permuted_caption_seed42` de los CSV: se barajó sobre todo el split del dataset (mezcla
+  train/val de este proyecto) y no existe para `prompt_categories`.
+- **Condiciones** = terna (texto, semántica, estructura): `correct`, `permuted`, `zero`,
+  `permuted_text`, y en ControlNet `semantic_permuted/zero` y `lowlevel_permuted/zero`.
+  Opcionales, pidiéndolas por nombre en `generation.conditions`: `generic_correct/permuted/zero`
+  (prompt fijo `"Image of something"`, control del §18.2). **Texto genérico ≠ ausencia de
+  texto**: son experimentos distintos y no deben agregarse en un único resultado (la
+  "brain-only legacy" es el experimento `exp04_generation_legacy`).
+  `zero` semántico = vector **cerebral** nulo (semántica histórica de Exp5); `zero` estructural
+  = `controlnet_conditioning_scale=0` (no "imagen negra"). `permuted` usa **una sola**
+  permutación para las dos ramas (salen del mismo forward).
+- **Embeddings de texto precomputados** (`scripts/13`): se deduplican los prompts y se cachean
+  en `data/features/text/<modalidad>/<sd_model>/<campo>/<hash>/`. El hash cubre plantilla,
+  campo, tokenizer, text encoder y `max_length`; si cambias algo y no reejecutas, **falla**.
+- **Condición ControlNet de entrenamiento** (`scripts/14`): `imagen real → VAE → PCA → PCA⁻¹ →
+  VAE decode → Canny`, NO `imagen real → Canny` (evita el salto train/inferencia, §8). Canny con
+  `skimage` y umbrales por **cuantiles** (la reconstrucción PCA es muy suave).
+- **Exp5** produce `metrics/generation_deltas.csv` con `delta_correct_permuted`,
+  `delta_correct_zero`, `delta_text`, `delta_semantic`, `delta_lowlevel` (+ variantes `_zero`),
+  con t-test pareado y Wilcoxon. Todas las condiciones comparten muestras y semilla de difusión.
+- ⚠️ **`load_text_encoder: false` sigue siendo el default, pero ya NO por incompatibilidad**:
+  con `transformers 5.6.2` + `diffusers 0.37.1` el text encoder de SD-1.5 carga sin problema
+  (verificado). El default se mantiene porque con el precompute no hace falta cargarlo nunca,
+  ni siquiera para el prompt vacío de CFG.
+- ⚠️ **Interpretación**: con caption oracle es esperable `correcto ≈ permutado`; eso **no**
+  implica que el decoder falle, sino que el texto domina el condicionamiento. Por eso el
+  baseline textual es el prompt **débil**. Reporta siempre `delta_brain` y `delta_text` juntos.
+
+### Compatibilidad con las ablaciones de preprocesado del EEG
+
+Captions, embeddings de texto, condiciones ControlNet y el propio `TokenAdapter` dependen
+**solo de las imágenes y del split** — nunca del EEG. Se comparten entre todas las variantes de
+`docs/05_...md` (misma condición que CLIP/VAE/PCA: no cambiar `val_ratio`/`split_seed`). Solo
+hay que reejecutar Exp4 (generar) y Exp5. Configs listos:
+`configs/EEG/exp04_raw_<variante>_generation_text_weak.yaml` (las 10 variantes) y
+`configs/EEG/exp04_raw_baseline_generation_controlnet_weak.yaml` (plantilla).
+
 ## Mapa de `src/`
 
 - `utils/` — infraestructura: `config` (YAML+`_base_`+overrides), `seed` (RNG), `device`
   (AMP, `make_grad_scaler`), `logging` (CSV/JSONL), `paths` (rutas centralizadas),
-  `checkpointing` (estado completo, retención, resume).
+  `checkpointing` (estado completo, retención, resume), `permutation` (derangement de Sattolo
+  y `condition_seed` — **compartidos** por la ablación cerebral y la permutación de captions;
+  `condition_seed` usa CRC32 en vez de `hash()`, que está salteado por proceso).
 - `data/` — fMRI: `subject_selection`, `algonauts_dataset` (`SubjectData` lee fMRI por `source`
   con mmap; `AlgonautsDataset`), `fmri_normalization`, `datamodule` (`FmriDataModule`: resuelve
   layout/sujetos/splits/normalización/DataLoaders + `SubjectHomogeneousBatchSampler`). EEG:
   `eeg_things_dataset` (`EegSubjectData`/`EegDataset`), `eeg_normalization` (`EegNormalizer`,
   por canal), `eeg_datamodule` (`EegDataModule`), `eeg_split` (split por imagen **compartido**
-  con el preprocesado). `factory` (`build_datamodule` por modalidad).
+  con el preprocesado). `factory` (`build_datamodule` por modalidad). `captions` (CSV de
+  captions por modalidad, alineación `image_id`→`feat_idx`, plantilla del prompt y permutación
+  textual dentro del split).
 - `preprocessing/` — pipeline propio EEG desde raw: `things_raw_loader` (layout, eventos del
   canal `stim`, QC), `filters` (backend MNE|scipy, FIR fase cero + resample antialias),
   `epoching` (epoch por bloques, baseline, crop half-open), `mvnn` (Ledoit–Wolf en NumPy,
   verificado contra sklearn), `build_variant` (orquesta y guarda la variante), `qc` (figuras).
 - `features/` — `clip_model` (carga CLIP congelado), `precompute_clip_embeddings`,
-  `precompute_vae_latents`, `fit_vae_pca` (PCA solo en train), `load_features`.
+  `precompute_vae_latents`, `fit_vae_pca` (PCA solo en train), `load_features`,
+  `text_embeddings` (text encoder congelado de SD, caché deduplicada con hash de config).
 - `models/` — `fmri_encoder` (MLP residual), `eeg_encoder` (`EEGEncoderTemporalConv`, conv
   temporal `[B,C,T]`), `heads` (CLIP/LowLevel), `adapters` (subject + token), `multitask_decoder`
   (`build_model`/`build_model_from_checkpoint`, elige encoder por `dataset.modality`).
@@ -210,12 +294,18 @@ invalida las features.
   `train_lowlevel_decoder`.
 - `evaluation/` — `retrieval_metrics`, `embedding_metrics`, `eval_data` (matrices por sujeto),
   `baselines` (media + ridge dual), `ablation_eval` (`evaluate_ablation`, `conclusion_...`),
-  `generation_metrics`.
-- `generation/` — `input_scale_sweep` (`sweep_adapter_input_scale`, barrido de la intensidad de
-  condicionamiento; `margin_table` compartido en `checkpoint_sweep`),
-  `sd_pipeline` (`FrozenSDGenerator`, `load_sd_pipeline`, `train_token_adapter`),
+  `generation_metrics`, `generation_ablation` (Exp5: puntúa cada condición, calcula los deltas
+  `delta_brain`/`delta_text`/`delta_semantic`/`delta_lowlevel`, tests pareados e informe).
+- `generation/` — `conditioning` (**las tres arquitecturas**: `ConditionSpec`, concatenación,
+  rama negativa de CFG, metadatos y compatibilidad de checkpoints), `controlnet_condition`
+  (PCA⁻¹ → VAE decode → Canny/depth, caché de condiciones), `input_scale_sweep`
+  (`sweep_adapter_input_scale`; `margin_table` compartido en `checkpoint_sweep`),
+  `controlnet_scale_sweep` (`sweep_controlnet_scale`, §25),
+  `sd_pipeline` (`FrozenSDGenerator`, `load_sd_pipeline`, `load_controlnet`,
+  `train_token_adapter`),
   `generate_from_fmri` (`generate_images` + helpers públicos `predict_condition_embeddings`,
-  `lowlevel_init_images`, `save_condition_images`), `make_grids`, `checkpoint_sweep`
+  `lowlevel_init_images`, `build_text_inputs`, `build_control_inputs`,
+  `resolve_adapter_checkpoint`, `save_condition_images`), `make_grids`, `checkpoint_sweep`
   (`sweep_adapter_checkpoints`, `discover_adapter_checkpoints`).
 
 ## Salidas (`outputs/<exp>/`)
@@ -223,6 +313,13 @@ invalida las features.
 `config.yaml`, `checkpoints/{last,best,epoch_XXXX}.pt`, `logs/{train_log.csv,resume_history.jsonl}`,
 `metrics/*.{json,csv}`, `figures/*.png`, `embeddings/*.npy`, `lowlevel/*.npy`,
 `generated/{real,correct,permuted,zero}/*.png`, `grids/*.png`, `report/summary.md`.
+Con la ampliación multimodal, `generated/` incluye además las condiciones extra
+(`permuted_text`, `semantic_*`, `lowlevel_*` — el mapa condición→carpeta está en
+`metadata/generation_params.json:condition_dirs`, así que `output_layout: nested` no rompe
+Exp5), `metrics/generation_deltas.csv` con los deltas pareados y
+`metadata/generation_samples.json` con un registro por (muestra, condición) suficiente para
+reconstruir cada imagen (prompt resuelto, condición cerebral/textual, semillas, escala de
+ControlNet…).
 Las métricas agregadas de la ablación usan formato tidy: `metric_name, condition, subject_id,
 split, value, seed, checkpoint`.
 
@@ -331,14 +428,30 @@ split, value, seed, checkpoint`.
   aleatorios el veredicto debe salir `fmri_not_clearly_used`). Ojo: el brain-tensor EEG es 3-D
   `[N,C,T]`; `RidgeRegression`/`evaluate_baselines` lo aplanan a `[N,C·T]` (ridge primal si
   features≤muestras, como en EEG; dual si features≫muestras, como en fMRI).
+- Ampliación multimodal: `python scripts/15_validate_multimodal.py --config <config>` (los 8
+  tests del §41 en segundos, CPU: retrocompatibilidad, shapes, CFG, alineación y permutación de
+  captions, ControlNet a escala 0, permutación cerebral compartida y compatibilidad de
+  checkpoints). `--skip-data` para la parte que no necesita el dataset.
+- Smoke test real de generación multimodal (minutos, GPU): añade `--set
+  generation.adapter_epochs=1 generation.adapter_max_train_samples=64
+  generation.num_samples=4 generation.num_inference_steps=6`; para ControlNet cachea solo lo
+  necesario con `scripts/14_precompute_controlnet_conditions.py --limit 64`.
 - Generación / diffusers reales: ejecuta con el **python del venv** (tiene SD en caché).
 - Estado actual de resultados (subj01) e interpretación: `docs/02_...md` §8 (Exp1/2/3 dieron
   **positivo claro**: correcto Top-5 87% ≫ controles ~3%; el MLP supera a ridge; low-level R²>0).
 
 ## Qué NO hacer (spec §20)
 
-- No entrenar ni fine-tunear Stable Diffusion / CLIP / VAE (van congelados).
-- No usar captions detallados como condición principal (taparían el aporte fMRI; prompt vacío).
+- No entrenar ni fine-tunear Stable Diffusion / CLIP / VAE / **ControlNet** / text encoder
+  (van congelados; lo único entrenable es el `fMRIEncoder`+cabezas y el `TokenAdapter`).
+- No usar captions detallados como condición principal: el baseline textual es el prompt
+  **débil** (`weak`); `oracle` es un techo de rendimiento que se reporta como tal, nunca como
+  resultado principal (§9.1.3, §38). El modo por defecto sigue siendo `none` (prompt vacío).
+- No comparar un caption correcto de una familia contra un permutado de otra: la permutación
+  textual debe venir SIEMPRE de la misma familia y del mismo split (§16).
+- No reutilizar un `TokenAdapter` entre arquitecturas o modos de texto como resultado final
+  (solo como smoke test explícito con `allow_incompatible_adapter`, §31).
+- No presentar "EEG oracle" como una condición más informativa que "EEG weak": son idénticas.
 - No mezclar train/val/test al ajustar PCA/normalizador/baselines.
 - No portar la arquitectura EEG (convoluciones temporales) como modelo principal de fMRI.
 - No atribuir imágenes generadas a la señal cerebral si la ablación (Exp2) no da

@@ -22,11 +22,15 @@ def main():
     ap.add_argument("--set", nargs="*", action=ExtendOverrides, default=None)
     ap.add_argument("--resume", nargs="?", const="auto", default=None,
                     help="'--resume' -> auto (last.pt); '--resume PATH' -> explicit")
+    ap.add_argument("--eval-only", action="store_true",
+                    help="skip training and just re-run the final evaluation "
+                         "from the existing best.pt (e.g. after a crash in the "
+                         "evaluation step)")
     args = ap.parse_args()
     log = get_logger("train_clip")
 
     cfg = load_config(args.config, args.set)
-    result = train_clip(cfg, resume=args.resume)
+    result = train_clip(cfg, resume=args.resume, eval_only=args.eval_only)
     log.info("Finished. Experiment dir: %s", result["experiment_dir"])
     for split, m in result.get("metrics", {}).items():
         log.info("  %s retrieval: %s", split, m["retrieval"])

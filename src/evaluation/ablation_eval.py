@@ -19,6 +19,10 @@ except Exception:  # pragma: no cover
     torch = None
 
 from ..utils import get_device, get_logger
+# Re-exported here for backwards compatibility: the derangement now lives in
+# src.utils.permutation so the *textual* permutation (src.data.captions) uses
+# literally the same code as the brain permutation.
+from ..utils.permutation import condition_seed, sattolo_derangement  # noqa: F401
 from .embedding_metrics import embedding_regression_metrics
 from .eval_data import load_subject_matrices
 from .retrieval_metrics import compute_retrieval_metrics
@@ -27,15 +31,6 @@ logger = get_logger("ablation")
 
 RETRIEVAL_KEYS = ("top1", "top5", "top10", "mean_rank", "median_rank",
                   "mean_cosine")
-
-
-def sattolo_derangement(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Uniformly random cyclic permutation of ``range(n)`` (no fixed points)."""
-    idx = np.arange(n)
-    for i in range(n - 1, 0, -1):
-        j = int(rng.integers(0, i))
-        idx[i], idx[j] = idx[j], idx[i]
-    return idx
 
 
 def make_condition_input(fmri: np.ndarray, condition: str,
@@ -99,7 +94,10 @@ def evaluate_ablation(model, cfg, datamodule, split: str = "test",
             raise FileNotFoundError(
                 f"Missing fMRI/CLIP for {subject}/{split}; precompute first.")
         for cond in conditions:
-            rng = np.random.default_rng(seed + hash(cond) % 100000)
+            # condition_seed (not hash()) so the permutation is identical across
+            # processes — Python salts hash() per run, which silently made the
+            # 'permuted' control non-reproducible between invocations.
+            rng = np.random.default_rng(condition_seed(seed, cond))
             fmri_in = make_condition_input(mats.fmri, cond, rng, noise_std)
             pred = _forward(model, fmri_in, subject, device, batch_size)
 

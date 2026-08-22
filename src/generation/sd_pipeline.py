@@ -1,4 +1,4 @@
-"""Frozen Stable Diffusion generation from fMRI-predicted representations.
+"""Frozen Stable Diffusion generation from brain-predicted representations.
 
 Mechanism (spec §10.3): Stable Diffusion 1.5 is used **frozen**. The predicted
 CLIP image embedding is turned into pseudo prompt-token embeddings by a small
@@ -6,12 +6,20 @@ trainable :class:`~src.models.adapters.TokenAdapter` and passed through the
 public ``prompt_embeds`` API of ``StableDiffusionPipeline`` (Option B). The
 UNet, VAE and text encoder are never trained. Optionally, the predicted
 low-level VAE-PCA vector is inverted to a latent and used as an img2img
-initialization (Option C), injecting fMRI-derived structure.
+initialization (Option C), injecting brain-derived structure.
 
-The token adapter is the only trainable module here; it is trained with a
-frozen-UNet diffusion (epsilon) loss over precomputed VAE latents and CLIP
-embeddings, so training needs neither the VAE nor CLIP in memory and fits a
-16 GB GPU (spec §10.2, §4).
+Multimodal extension (``generation.conditioning_architecture``):
+
+* ``legacy_adapter`` — unchanged behaviour, no caption/tokenizer/ControlNet;
+* ``text_adapter_concat`` — ``[text tokens ; neural tokens]`` via cross-attention;
+* ``text_adapter_concat_controlnet`` — the above plus a **frozen pretrained**
+  ControlNet fed with a spatial condition derived from the low-level branch.
+
+The token adapter remains the only trainable module; it is trained with a
+frozen-UNet (and, in the ControlNet architecture, a frozen-ControlNet) diffusion
+epsilon loss over precomputed VAE latents, CLIP embeddings, text embeddings and
+cached ControlNet conditions — so training needs neither the VAE, nor CLIP, nor
+the text encoder in memory (spec §10.2, §4).
 """
 from __future__ import annotations
 
@@ -33,28 +41,59 @@ from ..utils import (CheckpointManager, CSVLogger, JsonlLogger, autocast,
                      get_device, get_logger, load_checkpoint, make_grad_scaler,
                      save_checkpoint, save_config)
 from ..utils.paths import vae_latent_path
-from ..features.load_features import inverse_pca_to_latent, load_pca_bundle
 from ..features.load_features import load_split_features
+from .conditioning import (assert_adapter_compatible, build_uncond_condition,
+                           concat_condition, conditioning_metadata,
+                           controlnet_settings, num_neural_tokens,
+                           resolve_architecture, uses_controlnet, uses_text)
 
 logger = get_logger("sd")
 
 
+def _slice(values, start: int, stop: int):
+    """Slice a per-sample input (array or list) for a generation chunk."""
+    if values is None:
+        return None
+    return values[start:stop]
+
+
 # --- pipeline loading ------------------------------------------------------
-def load_sd_pipeline(cfg, device, img2img: bool = False, unet=None):
+def load_controlnet(cfg, device, dtype=None):
+    """Load the pretrained ControlNet — always frozen (§6.1, §7.1)."""
+    from diffusers import ControlNetModel
+    settings = controlnet_settings(cfg)
+    dtype = dtype or (torch.float16 if device.type == "cuda" else torch.float32)
+    model = ControlNetModel.from_pretrained(settings["model"], torch_dtype=dtype)
+    model = model.to(device)
+    model.eval()
+    for p in model.parameters():
+        p.requires_grad_(False)
+    logger.info("Loaded FROZEN ControlNet %s (condition=%s)", settings["model"],
+                settings["condition_type"])
+    return model
+
+
+def load_sd_pipeline(cfg, device, img2img: bool = False, unet=None,
+                     controlnet=None):
     from diffusers import (StableDiffusionImg2ImgPipeline,
                            StableDiffusionPipeline)
     model = str(cfg.get("generation.sd_model",
                         "stable-diffusion-v1-5/stable-diffusion-v1-5"))
     dtype = torch.float16 if device.type == "cuda" else torch.float32
-    cls = StableDiffusionImg2ImgPipeline if img2img else StableDiffusionPipeline
-    # Generation is conditioned via `prompt_embeds` (from the token adapter), so
-    # the SD text encoder is only needed for the empty *negative* prompt. By
-    # default we skip loading it: this sidesteps transformers/diffusers version
-    # incompatibilities (a strict text-encoder loader can reject the SD-1.5
-    # checkpoint) and matches this project's empty-prompt design — the
-    # unconditional branch then falls back to a zero embedding. Set
-    # generation.load_text_encoder=true to use the real empty-string embedding
-    # when your transformers/diffusers versions are known-compatible.
+    if controlnet is not None:
+        from diffusers import (StableDiffusionControlNetImg2ImgPipeline,
+                               StableDiffusionControlNetPipeline)
+        cls = (StableDiffusionControlNetImg2ImgPipeline if img2img
+               else StableDiffusionControlNetPipeline)
+    else:
+        cls = StableDiffusionImg2ImgPipeline if img2img else StableDiffusionPipeline
+    # Generation is conditioned via `prompt_embeds` (token adapter, plus the
+    # PRECOMPUTED text embeddings when a caption is used), so the SD text encoder
+    # is only needed for the empty *negative* prompt. By default we skip loading
+    # it: it sidesteps transformers/diffusers version incompatibilities and keeps
+    # VRAM free; the unconditional branch then uses the cached empty-prompt
+    # embedding (text architectures) or a zero embedding (legacy). Set
+    # generation.load_text_encoder=true to load it anyway.
     load_kwargs = dict(torch_dtype=dtype, safety_checker=None,
                        requires_safety_checker=False)
     if not bool(cfg.get("generation.load_text_encoder", False)):
@@ -64,16 +103,35 @@ def load_sd_pipeline(cfg, device, img2img: bool = False, unet=None):
     # component passed explicitly. Used by the in-loop generation eval.
     if unet is not None:
         load_kwargs["unet"] = unet
+    if controlnet is not None:
+        load_kwargs["controlnet"] = controlnet
     pipe = cls.from_pretrained(model, **load_kwargs)
     pipe = pipe.to(device)
     pipe.set_progress_bar_config(disable=True)
-    for module in (pipe.unet, pipe.vae, getattr(pipe, "text_encoder", None)):
+    for module in (pipe.unet, pipe.vae, getattr(pipe, "text_encoder", None),
+                   getattr(pipe, "controlnet", None)):
         if module is None:
             continue
         for p in module.parameters():
             p.requires_grad_(False)
+    # ⚠️ Attention slicing is an INFERENCE optimization: it computes attention in
+    # chunks inside a Python loop, so under autograd every chunk keeps its own
+    # saved tensors and the backward pass needs *more* memory, not less
+    # (measured on this project: 9.2 GiB -> 30.1 GiB for one adapter training
+    # step at batch 8, i.e. an OOM). When `unet`/`controlnet` are passed in we do
+    # NOT own them — they are the modules the adapter is being trained through —
+    # so slicing them would silently wreck the training memory profile. The
+    # in-loop eval only generates a handful of images under no_grad and does not
+    # need slicing anyway.
+    borrowed = unet is not None or controlnet is not None
     if bool(cfg.get("generation.enable_attention_slicing", True)):
-        pipe.enable_attention_slicing()
+        if borrowed:
+            logger.debug("Reusing an externally-owned UNet/ControlNet: attention "
+                         "slicing NOT enabled (it would inflate the training "
+                         "backward memory).")
+        else:
+            pipe.enable_attention_slicing()
+    # The VAE is always loaded by the pipeline itself, so slicing it is safe.
     if bool(cfg.get("generation.enable_vae_slicing", True)):
         pipe.enable_vae_slicing()
     if bool(cfg.get("generation.cpu_offload", False)):
@@ -84,24 +142,48 @@ def load_sd_pipeline(cfg, device, img2img: bool = False, unet=None):
 class FrozenSDGenerator:
     """Wraps a frozen SD pipeline + a (optional) trained token adapter."""
 
-    def __init__(self, cfg, device=None, mode: Optional[str] = None, unet=None):
+    def __init__(self, cfg, device=None, mode: Optional[str] = None, unet=None,
+                 controlnet=None, text_cache=None):
         self.cfg = cfg
         self.device = device or get_device(cfg.get("runtime.device", "auto"))
         self.mode = mode or str(cfg.get("generation.mode", "adapter"))
         self.use_img2img = self.mode in ("lowlevel_img2img", "adapter_lowlevel")
+        self.architecture = resolve_architecture(cfg)
+        self.use_text = uses_text(cfg)
+        self.controlnet_settings = controlnet_settings(cfg)
+        self.use_controlnet = self.controlnet_settings["enabled"]
+        if self.use_controlnet and controlnet is None:
+            controlnet = load_controlnet(cfg, self.device)
         self.pipe = load_sd_pipeline(cfg, self.device, img2img=self.use_img2img,
-                                     unet=unet)
+                                     unet=unet, controlnet=controlnet)
         self.cross_dim = int(self.pipe.unet.config.cross_attention_dim)
-        self.num_tokens = int(cfg.get("generation.num_tokens", 77))
+        #: K — pseudo-tokens emitted by the adapter (77 in the legacy line).
+        self.num_tokens = num_neural_tokens(cfg)
         te = getattr(self.pipe, "text_encoder", None)
         self.embeds_dtype = te.dtype if te is not None else self.pipe.unet.dtype
         self.adapter = None
         self._uncond_cache = {}
+        #: Cached empty-prompt embedding for the CFG negative branch of the text
+        #: architectures (``[1, L, D]``); None in the legacy line.
+        self.empty_text_embeds = None
+        if self.use_text:
+            self._load_empty_text(text_cache)
         # Optional calibration of the *predicted* CLIP embedding norm before the
         # adapter (see `rescale_to_norm` in _prompt_embeds). Set by the inference
         # entry points when generation.rescale_clip_pred is enabled; left None
         # for the in-loop adapter eval, which already feeds real embeddings.
         self.rescale_to_norm: Optional[float] = None
+        logger.info("Generator: architecture=%s mode=%s | K=%d tokens | text=%s "
+                    "| controlnet=%s", self.architecture, self.mode,
+                    self.num_tokens, self.use_text, self.use_controlnet)
+
+    def _load_empty_text(self, text_cache):
+        from ..features.text_embeddings import load_text_cache
+        cache = text_cache if text_cache is not None else load_text_cache(self.cfg)
+        if cache is None:
+            return
+        self.empty_text_embeds = torch.from_numpy(
+            np.ascontiguousarray(cache.special("empty"))).to(self.device)
 
     # -- adapter -----------------------------------------------------------
     def load_adapter(self, clip_dim: int, checkpoint_path=None):
@@ -110,13 +192,17 @@ class FrozenSDGenerator:
         ``normalize_input`` (Option B) is taken from the **checkpoint** when it
         records it, so an adapter trained on normalized embeddings can never be
         run un-normalized (or vice versa) by accident — that mismatch would
-        silently produce garbage conditioning.
+        silently produce garbage conditioning. The conditioning architecture,
+        text mode and ControlNet setup are checked the same way (§14).
         """
-        cfg_norm = bool(self.cfg.get("generation.adapter_normalize_input", False))
+        from .conditioning import (adapter_input_scale,
+                                   adapter_normalize_input)
+        cfg_norm = adapter_normalize_input(self.cfg)
         normalize_input = cfg_norm
         state = None
         if checkpoint_path is not None and Path(checkpoint_path).exists():
             state = load_checkpoint(checkpoint_path, map_location=self.device)
+            assert_adapter_compatible(state, self.cfg, source=str(checkpoint_path))
             if "normalize_input" in state:
                 normalize_input = bool(state["normalize_input"])
                 if normalize_input != cfg_norm:
@@ -132,7 +218,7 @@ class FrozenSDGenerator:
             clip_dim, cross_dim=self.cross_dim, num_tokens=self.num_tokens,
             hidden_dim=int(self.cfg.get("generation.adapter_hidden", 1024)),
             normalize_input=normalize_input,
-            input_scale=float(self.cfg.get("generation.adapter_input_scale", 1.0)),
+            input_scale=adapter_input_scale(self.cfg),
         ).to(self.device)
         if state is not None:
             self.adapter.load_state_dict(state["adapter_state_dict"])
@@ -148,28 +234,51 @@ class FrozenSDGenerator:
         self.adapter.eval()
         return self.adapter
 
-    def _empty_text_embeds(self, num: int):
-        if num in self._uncond_cache:
-            return self._uncond_cache[num]
+    def _encode_empty_prompt(self, num: int):
+        """SD's own embedding of ``""``, or None when no text encoder is loaded."""
         tokenizer = getattr(self.pipe, "tokenizer", None)
         text_encoder = getattr(self.pipe, "text_encoder", None)
         if tokenizer is None or text_encoder is None:
-            # No text encoder loaded -> zero unconditional embedding (empty-prompt
-            # design; classifier-free guidance still steers toward the adapter tokens).
-            emb = torch.zeros(num, self.num_tokens, self.cross_dim,
-                              device=self.device, dtype=self.embeds_dtype)
+            return None
+        ids = tokenizer([""] * num, padding="max_length",
+                        max_length=tokenizer.model_max_length, truncation=True,
+                        return_tensors="pt").input_ids.to(self.device)
+        with torch.no_grad():
+            return text_encoder(ids)[0]
+
+    def _empty_text_embeds(self, num: int):
+        """Unconditional (CFG negative) condition, same length as the positive one.
+
+        Legacy: the SD empty-prompt embedding if the text encoder was loaded,
+        else zeros ``[num, K, D]`` (the project's empty-prompt design).
+        Text architectures: ``[empty-text tokens ; zero-brain tokens]`` (§12).
+        """
+        if num in self._uncond_cache:
+            return self._uncond_cache[num]
+        if not self.use_text:
+            # Legacy line: the whole condition IS the neural block.
+            emb = self._encode_empty_prompt(num)
+            if emb is None:
+                emb = torch.zeros(num, self.num_tokens, self.cross_dim,
+                                  device=self.device, dtype=self.embeds_dtype)
         else:
-            ids = tokenizer(
-                [""] * num, padding="max_length",
-                max_length=tokenizer.model_max_length,
-                truncation=True, return_tensors="pt").input_ids.to(self.device)
-            with torch.no_grad():
-                emb = text_encoder(ids)[0]
+            empty = self.empty_text_embeds
+            if empty is None:
+                empty = self._encode_empty_prompt(1)
+            if empty is None:
+                raise RuntimeError(
+                    "The text architecture needs the empty-prompt embedding for "
+                    "the CFG negative branch (§12). Run "
+                    "scripts/13_precompute_text_embeddings.py (it caches it), or "
+                    "set generation.load_text_encoder=true.")
+            emb = build_uncond_condition(empty, num, self.num_tokens,
+                                         self.cross_dim, self.device,
+                                         self.embeds_dtype)
         self._uncond_cache[num] = emb
         return emb
 
-    def _prompt_embeds(self, clip_embeds):
-        """Build [B, num_tokens, cross_dim] conditioning from CLIP embeddings."""
+    def _neural_tokens(self, clip_embeds):
+        """``[B, K, cross_dim]`` pseudo-tokens from a CLIP embedding batch."""
         clip_embeds = torch.as_tensor(clip_embeds, dtype=torch.float32,
                                       device=self.device)
         if self.rescale_to_norm is not None:
@@ -183,11 +292,26 @@ class FrozenSDGenerator:
             norm = clip_embeds.norm(dim=-1, keepdim=True).clamp_min(1e-8)
             clip_embeds = clip_embeds / norm * float(self.rescale_to_norm)
         if self.adapter is None:
-            # no adapter -> unconditional (Option C relies on the img2img init)
-            return self._empty_text_embeds(clip_embeds.shape[0]).to(self.embeds_dtype)
+            return None
         with torch.no_grad():
-            tokens = self.adapter(clip_embeds)
-        return tokens.to(self.embeds_dtype)
+            return self.adapter(clip_embeds).to(self.embeds_dtype)
+
+    def _prompt_embeds(self, clip_embeds, text_embeds=None):
+        """Full conditioning tensor for the positive CFG branch."""
+        tokens = self._neural_tokens(clip_embeds)
+        num = int(np.asarray(clip_embeds).shape[0])
+        if text_embeds is None:
+            if tokens is None:
+                # no adapter -> unconditional (Option C relies on the img2img init)
+                return self._empty_text_embeds(num).to(self.embeds_dtype)
+            return tokens
+        text = torch.as_tensor(np.ascontiguousarray(text_embeds)) \
+            if not torch.is_tensor(text_embeds) else text_embeds
+        text = text.to(device=self.device, dtype=self.embeds_dtype)
+        if tokens is None:
+            tokens = torch.zeros(num, self.num_tokens, self.cross_dim,
+                                 device=self.device, dtype=self.embeds_dtype)
+        return concat_condition(text, tokens)
 
     # -- latent utils (Option C) ------------------------------------------
     def decode_latents_to_pil(self, latents_scaled):
@@ -202,16 +326,68 @@ class FrozenSDGenerator:
     # -- generation --------------------------------------------------------
     def generate(self, clip_embeds, seed: int = 123, guidance_scale: float = 3.0,
                  num_inference_steps: int = 50, init_images=None,
-                 strength: float = 0.8) -> List:
-        num = int(np.asarray(clip_embeds).shape[0])
-        prompt_embeds = self._prompt_embeds(clip_embeds)
-        negative = self._empty_text_embeds(num).to(prompt_embeds.dtype)
+                 strength: float = 0.8, text_embeds=None, control_images=None,
+                 controlnet_scale: Optional[float] = None,
+                 batch_size: Optional[int] = None) -> List:
+        """Run the frozen pipeline for one experimental condition.
+
+        All comparisons are paired: the caller passes the same ``seed`` for every
+        condition so the initial noise, scheduler and step count are identical
+        and only the conditioning changes (§24).
+
+        ``batch_size`` (``generation.batch_size``) splits the samples into chunks
+        so ``num_samples`` is not capped by VRAM: the whole set used to go through
+        the UNet at once (twice, because of CFG), which limited Experiment 5 to a
+        handful of paired samples. The chunks share ONE generator, and every
+        condition is chunked identically, so sample *i* still gets exactly the
+        same initial noise under every condition.
+        """
+        clip_embeds = np.asarray(clip_embeds)
+        num = int(clip_embeds.shape[0])
+        if batch_size is None:
+            batch_size = self.cfg.get("generation.batch_size", None)
+        chunk = num if not batch_size else max(1, min(int(batch_size), num))
         generator = torch.Generator(device=self.device).manual_seed(int(seed))
+        images: List = []
+        for start in range(0, num, chunk):
+            stop = min(start + chunk, num)
+            images.extend(self._generate_batch(
+                clip_embeds[start:stop], generator, guidance_scale,
+                num_inference_steps,
+                _slice(init_images, start, stop), strength,
+                _slice(text_embeds, start, stop),
+                _slice(control_images, start, stop), controlnet_scale))
+        return images
+
+    def _generate_batch(self, clip_embeds, generator, guidance_scale,
+                        num_inference_steps, init_images, strength, text_embeds,
+                        control_images, controlnet_scale) -> List:
+        num = int(np.asarray(clip_embeds).shape[0])
+        prompt_embeds = self._prompt_embeds(clip_embeds, text_embeds)
+        negative = self._empty_text_embeds(num).to(prompt_embeds.dtype)
+        if negative.shape[1] != prompt_embeds.shape[1]:
+            raise ValueError(
+                f"CFG branches must have the same length: positive "
+                f"{tuple(prompt_embeds.shape)} vs negative {tuple(negative.shape)}")
         common = dict(prompt_embeds=prompt_embeds, negative_prompt_embeds=negative,
                       num_inference_steps=int(num_inference_steps),
                       guidance_scale=float(guidance_scale), generator=generator)
+        if self.use_controlnet:
+            scale = (self.controlnet_settings["conditioning_scale"]
+                     if controlnet_scale is None else float(controlnet_scale))
+            if control_images is None:
+                raise ValueError("The ControlNet architecture needs control images; "
+                                 "none were passed.")
+            common.update(controlnet_conditioning_scale=float(scale),
+                          control_guidance_start=self.controlnet_settings["guidance_start"],
+                          control_guidance_end=self.controlnet_settings["guidance_end"])
         with autocast(self.device, enabled=self.device.type == "cuda"):
-            if self.use_img2img and init_images is not None:
+            if self.use_controlnet and self.use_img2img and init_images is not None:
+                images = self.pipe(image=init_images, control_image=control_images,
+                                   strength=float(strength), **common).images
+            elif self.use_controlnet:
+                images = self.pipe(image=control_images, **common).images
+            elif self.use_img2img and init_images is not None:
                 images = self.pipe(image=init_images, strength=float(strength),
                                    **common).images
             else:
@@ -221,7 +397,12 @@ class FrozenSDGenerator:
 
 # --- token-adapter training (frozen-UNet diffusion loss) -------------------
 def _load_adapter_training_data(cfg, datamodule, split="train"):
-    clip_parts, latent_parts = [], []
+    """CLIP embeddings + VAE latents + the (subject, split, feat_idx) key of each row.
+
+    The key is what lets the text embeddings and the cached ControlNet conditions
+    be looked up for the same sample without re-deriving any alignment.
+    """
+    clip_parts, latent_parts, keys = [], [], []
     for subj in datamodule.subjects:
         clip = load_split_features(cfg, subj, split, "clip")
         lat_path = vae_latent_path(cfg, subj, split)
@@ -233,8 +414,27 @@ def _load_adapter_training_data(cfg, datamodule, split="train"):
         n = min(len(clip), len(latents))
         clip_parts.append(clip[:n])
         latent_parts.append(latents[:n])
+        keys.extend((subj, split, i) for i in range(n))
     return (np.concatenate(clip_parts, 0).astype(np.float32),
-            np.concatenate(latent_parts, 0).astype(np.float32))
+            np.concatenate(latent_parts, 0).astype(np.float32), keys)
+
+
+def _text_rows_for_keys(text_cache, keys) -> np.ndarray:
+    """Row of ``unique_embeds`` for every training sample (correct captions)."""
+    rows = np.empty(len(keys), dtype=np.int64)
+    index_cache = {}
+    for i, (subject, split, feat_idx) in enumerate(keys):
+        pair = (subject, split)
+        if pair not in index_cache:
+            index_cache[pair] = text_cache.index(subject, split, permuted=False)
+        idx = index_cache[pair]
+        if feat_idx >= len(idx):
+            raise IndexError(
+                f"Text embeddings for {subject}/{split} cover {len(idx)} samples "
+                f"but the adapter training set needs index {feat_idx}. Re-run "
+                f"scripts/13_precompute_text_embeddings.py.")
+        rows[i] = idx[feat_idx]
+    return rows
 
 
 def _build_adapter_scheduler(optimizer, cfg, steps_per_epoch: int, epochs: int):
@@ -263,7 +463,14 @@ def _build_adapter_scheduler(optimizer, cfg, steps_per_epoch: int, epochs: int):
 
 
 def train_token_adapter(cfg, datamodule, resume=None) -> dict:
-    """Train the TokenAdapter with a frozen SD-1.5 UNet epsilon-prediction loss."""
+    """Train the TokenAdapter with a frozen SD-1.5 UNet epsilon-prediction loss.
+
+    In the text architectures the loss is computed on the SAME concatenated
+    condition used at inference (``[text ; neural]``), and in the ControlNet
+    architecture with the frozen ControlNet active — otherwise the adapter would
+    be optimized for a different denoising problem than the one it is deployed
+    in (§31).
+    """
     from diffusers import DDPMScheduler, UNet2DConditionModel
 
     device = get_device(cfg.get("runtime.device", "auto"))
@@ -273,6 +480,12 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
     ckpt_dir = paths.checkpoints
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     last_path, best_path = ckpt_dir / "adapter_last.pt", ckpt_dir / "adapter_best.pt"
+
+    cond_meta = conditioning_metadata(cfg)
+    with_text, with_controlnet = uses_text(cfg), uses_controlnet(cfg)
+    logger.info("Training adapter for architecture '%s' (text=%s, controlnet=%s)",
+                cond_meta["conditioning_architecture"], cond_meta["text_mode"],
+                cond_meta["controlnet_model"])
 
     model_name = str(cfg.get("generation.sd_model",
                              "stable-diffusion-v1-5/stable-diffusion-v1-5"))
@@ -287,18 +500,64 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
     noise_sched = DDPMScheduler.from_pretrained(model_name, subfolder="scheduler")
     pred_type = noise_sched.config.prediction_type
 
-    clip_np, lat_np = _load_adapter_training_data(cfg, datamodule, "train")
+    controlnet = None
+    control_cache = None
+    # Train with the SAME conditioning strength used at inference: the adapter
+    # must learn to complement residuals of that magnitude, not of another one.
+    control_scale = float(controlnet_settings(cfg)["conditioning_scale"])
+    if with_controlnet:
+        from .controlnet_condition import ControlConditionCache
+        source = str(cfg.get("generation.controlnet.training_condition_source",
+                             "gt_vae_pca_reconstruction"))
+        if source != "gt_vae_pca_reconstruction":
+            raise NotImplementedError(
+                f"controlnet.training_condition_source={source!r} is not "
+                f"implemented; the baseline is 'gt_vae_pca_reconstruction' "
+                f"(§8.1 lists brain_predicted_oof as future work).")
+        controlnet = load_controlnet(cfg, device, dtype=dtype)
+        if bool(cfg.get("generation.grad_checkpointing", True)):
+            controlnet.enable_gradient_checkpointing()
+        control_cache = ControlConditionCache(
+            cfg, [(s, "train") for s in datamodule.subjects])
+
+    clip_np, lat_np, keys = _load_adapter_training_data(cfg, datamodule, "train")
+    limit = cfg.get("generation.adapter_max_train_samples", None)
+    if limit:
+        # Smoke-test knob: run the real loop over the FIRST N training samples so
+        # the whole path (text + ControlNet + checkpointing) can be exercised in
+        # minutes. Deliberately the first N and not a random subset, so it lines
+        # up with `scripts/14_precompute_controlnet_conditions.py --limit N`.
+        # NEVER set it for a final run.
+        limit = min(int(limit), len(clip_np))
+        clip_np, lat_np, keys = clip_np[:limit], lat_np[:limit], keys[:limit]
+        logger.warning("generation.adapter_max_train_samples=%d: training on a "
+                       "SUBSET of the train split (smoke test only).", limit)
     clip_dim = clip_np.shape[1]
     n = clip_np.shape[0]
-    latent_shape = [4, int(cfg.get("features.vae_image_size", 512)) // 8,
-                    int(cfg.get("features.vae_image_size", 512)) // 8]
+    image_size = int(cfg.get("features.vae_image_size", 512))
+    latent_shape = [4, image_size // 8, image_size // 8]
     cross_dim = int(unet.config.cross_attention_dim)
-    num_tokens = int(cfg.get("generation.num_tokens", 77))
+    num_tokens = num_neural_tokens(cfg)
+
+    text_embeds_np, text_rows = None, None
+    if with_text:
+        from ..features.text_embeddings import load_text_cache
+        text_cache = load_text_cache(cfg)
+        if text_cache.embed_dim != cross_dim:
+            raise ValueError(
+                f"Text embeddings are {text_cache.embed_dim}-d but the UNet's "
+                f"cross-attention is {cross_dim}-d. The text encoder and the "
+                f"UNet must come from the same SD checkpoint.")
+        text_embeds_np = text_cache.embeds          # [U, L, D] fp16, kept on CPU
+        text_rows = _text_rows_for_keys(text_cache, keys)
+        logger.info("Text conditioning: %d unique prompt(s), L=%d, e.g. %r",
+                    text_embeds_np.shape[0], text_embeds_np.shape[1],
+                    text_cache.prompt(keys[0][0], keys[0][1], keys[0][2]))
 
     # Option B: train on L2-normalized CLIP embeddings so the adapter is
     # scale-invariant by construction. The flag is stored in every checkpoint so
     # inference can never mismatch it. Training always runs at input_scale=1.0.
-    normalize_input = bool(cfg.get("generation.adapter_normalize_input", False))
+    normalize_input = bool(cond_meta["adapter_normalize_input"])
     adapter = TokenAdapter(clip_dim, cross_dim=cross_dim, num_tokens=num_tokens,
                            hidden_dim=int(cfg.get("generation.adapter_hidden",
                                                   1024)),
@@ -348,6 +607,10 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
                 f"normalize_input={bool(prev_norm)} but the config says "
                 f"{normalize_input}. Mixing both regimes would corrupt training — "
                 f"use a different experiment.name for the other setting.")
+        # Same reasoning for the conditioning architecture / text mode /
+        # ControlNet: resuming across them would blend two different models.
+        assert_adapter_compatible(state, cfg, allow=False,
+                                  source=f"resume {resume_path}")
         adapter.load_state_dict(state["adapter_state_dict"])
         optimizer.load_state_dict(state["optimizer_state_dict"])
         if scheduler is not None and state.get("scheduler_state_dict"):
@@ -374,7 +637,8 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
     # adapter and score them by CLIP similarity to the real image (a direct
     # proxy of generation quality, unlike the training loss). Reuses the training
     # UNet (no second copy loaded). None if disabled.
-    eval_ctx = _build_adapter_eval_context(cfg, datamodule, unet, device)
+    eval_ctx = _build_adapter_eval_context(cfg, datamodule, unet, device,
+                                           controlnet=controlnet)
     eval_every = max(1, int(cfg.get("generation.adapter_eval_every_n_epochs", 5)))
     select_by = str(cfg.get("generation.adapter_select_by", "auto")).lower()
     if select_by == "auto":
@@ -400,6 +664,15 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
             idx = order[start:start + batch_size]
             cond_in = clip_t[idx].to(device)
             z0 = lat_t[idx].to(device, dtype=dtype)
+            text_batch = None
+            if text_rows is not None:
+                text_batch = torch.from_numpy(
+                    np.ascontiguousarray(text_embeds_np[text_rows[idx]])
+                ).to(device=device, dtype=dtype)
+            control_batch = None
+            if control_cache is not None:
+                control_batch = control_cache.batch_tensor(
+                    [keys[i] for i in idx], image_size, device, dtype)
             optimizer.zero_grad(set_to_none=True)
             with autocast(device, enabled=amp):
                 # Adapter forward computed ONCE per batch; the (noise, timestep)
@@ -408,7 +681,9 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
                 # the per-step loss (each image is otherwise scored at a single
                 # random t, whose difficulty swings a lot). Costs n_timesteps
                 # extra frozen-UNet forwards per batch (more VRAM/time).
-                cond = adapter(cond_in).to(dtype)
+                tokens = adapter(cond_in).to(dtype)
+                cond = concat_condition(text_batch, tokens) if text_batch is not None \
+                    else tokens
                 step_losses = []
                 for _ in range(n_timesteps):
                     noise = torch.randn_like(z0)
@@ -417,7 +692,15 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
                     zt = noise_sched.add_noise(z0, noise, t)
                     target = noise if pred_type == "epsilon" else \
                         noise_sched.get_velocity(z0, noise, t)
-                    pred = unet(zt, t, encoder_hidden_states=cond).sample
+                    extra = {}
+                    if controlnet is not None:
+                        down, mid = controlnet(
+                            zt, t, encoder_hidden_states=cond,
+                            controlnet_cond=control_batch,
+                            conditioning_scale=control_scale, return_dict=False)
+                        extra = {"down_block_additional_residuals": down,
+                                 "mid_block_additional_residual": mid}
+                    pred = unet(zt, t, encoder_hidden_states=cond, **extra).sample
                     step_losses.append(
                         torch.nn.functional.mse_loss(pred.float(), target.float()))
                 loss = torch.stack(step_losses).mean() if n_timesteps > 1 \
@@ -459,9 +742,14 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
                  "epoch": epoch, "global_step": global_step,
                  "best_loss": best_loss, "best_val_sim": best_val_sim,
                  "select_by": select_by, "clip_dim": clip_dim,
+                 "num_tokens": num_tokens,
                  # Option B flag: inference MUST use the same setting, so it
                  # travels with the weights (see FrozenSDGenerator.load_adapter).
                  "normalize_input": normalize_input,
+                 # Full conditioning identity (§14): architecture, text mode,
+                 # caption field/template and ControlNet setup. Loading a
+                 # checkpoint under a different one is an error, not a warning.
+                 "conditioning": cond_meta,
                  "config": cfg.to_dict() if hasattr(cfg, "to_dict") else dict(cfg)}
         save_checkpoint(state, last_path)
         if is_best:
@@ -479,33 +767,47 @@ def train_token_adapter(cfg, datamodule, resume=None) -> dict:
             "best_loss": best_loss,
             "best_val_sim": None if best_val_sim == float("-inf") else best_val_sim,
             "select_by": select_by, "clip_dim": clip_dim,
-            "normalize_input": normalize_input}
+            "normalize_input": normalize_input, "conditioning": cond_meta}
 
 
-def _build_adapter_eval_context(cfg, datamodule, unet, device):
+def _build_adapter_eval_context(cfg, datamodule, unet, device, controlnet=None):
     """Prepare in-loop generation eval, or return None if disabled.
 
     Uses a small held-out set of images and their *precomputed* real CLIP
     embeddings (the same kind of input the adapter is trained on) — so it
     measures the adapter's core job (CLIP-embedding -> image) directly, with no
-    dependence on the fMRI decoder. Reuses the training UNet for the pipeline
-    (no second UNet copy) and forces mode='adapter' (pure semantic path).
+    dependence on the brain decoder. Reuses the training UNet/ControlNet for the
+    pipeline (no second copy) and forces mode='adapter' (pure semantic path).
+    The text and ControlNet conditions come from the SAME sources used during
+    training, so the eval scores the deployed conditioning.
     """
     if not bool(cfg.get("generation.adapter_eval_enabled", False)):
         return None
     split = str(cfg.get("generation.adapter_eval_split", "val"))
     k = int(cfg.get("generation.adapter_eval_num_samples", 6))
     seed = int(cfg.get("generation.sample_seed", cfg.get("project.seed", 42)))
-    clip_embs, reals = _load_adapter_eval_data(cfg, datamodule, split, k, seed)
+    clip_embs, reals, rows = _load_adapter_eval_data(cfg, datamodule, split, k, seed)
     if clip_embs is None:
         logger.warning("adapter_eval_enabled but no CLIP features/images for "
                        "split '%s'; disabling in-loop eval.", split)
         return None
     from ..features.clip_model import load_clip
-    gen = FrozenSDGenerator(cfg, device=device, mode="adapter", unet=unet)
+    text_embeds = None
+    if uses_text(cfg):
+        from ..features.text_embeddings import load_text_cache
+        cache = load_text_cache(cfg)
+        text_embeds = np.stack([cache.rows(s, split, [f])[0] for s, f in rows])
+    control_images = None
+    if uses_controlnet(cfg):
+        from .controlnet_condition import ControlConditionCache
+        cache = ControlConditionCache(cfg, [(s, split) for s, _ in rows])
+        control_images = [cache.load(s, split, f) for s, f in rows]
+    gen = FrozenSDGenerator(cfg, device=device, mode="adapter", unet=unet,
+                            controlnet=controlnet)
     gs = cfg.get("generation.adapter_eval_guidance_scale")
     return {"gen": gen, "clip_bundle": load_clip(cfg, device),
             "clip_embs": clip_embs, "reals": reals, "seed": seed,
+            "text_embeds": text_embeds, "control_images": control_images,
             "steps": int(cfg.get("generation.adapter_eval_steps", 25)),
             "gs": float(gs if gs is not None
                         else cfg.get("generation.guidance_scale", 3.0))}
@@ -516,22 +818,26 @@ def _load_adapter_eval_data(cfg, datamodule, split, k, seed):
     from ..features.load_features import load_split_features
     frame = datamodule.get_frame(split)
     if len(frame) == 0:
-        return None, None
+        return None, None, None
+    # One row per image: with per-trial EEG frames the same image would
+    # otherwise be sampled several times.
+    frame = frame.drop_duplicates(subset=["subject_id", "feat_idx"])
     rng = np.random.default_rng(seed + 777)
     idx = np.sort(rng.choice(len(frame), size=min(k, len(frame)), replace=False))
     rows = frame.iloc[idx]
     size = int(cfg.get("features.vae_image_size", 512))
-    clip_cache, embs, reals = {}, [], []
+    clip_cache, embs, reals, keys = {}, [], [], []
     for r in rows.itertuples():
         subj = r.subject_id
         if subj not in clip_cache:
             clip_cache[subj] = load_split_features(cfg, subj, split, "clip")
         arr = clip_cache[subj]
         if arr is None:
-            return None, None
+            return None, None, None
         embs.append(arr[int(r.feat_idx)])
         reals.append(load_image(str(r.image_path)).resize((size, size)))
-    return np.stack(embs).astype(np.float32), reals
+        keys.append((str(subj), int(r.feat_idx)))
+    return np.stack(embs).astype(np.float32), reals, keys
 
 
 def _eval_adapter_quality(ctx, adapter, device) -> float:
@@ -544,7 +850,8 @@ def _eval_adapter_quality(ctx, adapter, device) -> float:
     try:
         images = ctx["gen"].generate(
             ctx["clip_embs"], seed=ctx["seed"], guidance_scale=ctx["gs"],
-            num_inference_steps=ctx["steps"])
+            num_inference_steps=ctx["steps"], text_embeds=ctx.get("text_embeds"),
+            control_images=ctx.get("control_images"))
         res = compute_generation_metrics(ctx["reals"], images, ctx["clip_bundle"],
                                          device, ks=(1,))
         return float(res["metrics"]["mean_clip_similarity"])

@@ -22,8 +22,10 @@ from ..data import build_datamodule, load_image
 from ..evaluation.generation_metrics import compute_generation_metrics
 from ..features.clip_model import load_clip
 from ..utils import get_device, get_experiment_paths, get_logger, load_checkpoint, save_json
-from .generate_from_fmri import (load_decoder, lowlevel_init_images,
-                                 resolve_clip_rescale,
+from .conditioning import required_brain_conditions, resolve_conditions
+from .generate_from_fmri import (_condition_scale, build_control_inputs,
+                                 build_text_inputs, load_decoder,
+                                 lowlevel_init_images, resolve_clip_rescale,
                                  predict_condition_embeddings,
                                  save_condition_images, select_samples)
 from .make_grids import save_comparison_grid
@@ -101,6 +103,12 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
             "generation.mode=adapter (or adapter_lowlevel) to sweep "
             "adapter checkpoints meaningfully.", mode)
 
+    # Resolve conditions exactly like Exp4 so a text/ControlNet architecture is
+    # swept with its real conditioning (the positive CFG branch would otherwise
+    # be missing the text half and the run would abort on a length mismatch).
+    specs = resolve_conditions(cfg, conditions)
+    brain_conditions = required_brain_conditions(specs)
+
     dm = build_datamodule(cfg).prepare()
     model, meta = load_decoder(cfg, dm, decoder_checkpoint, device)
     sample_seed = int(cfg.get("generation.sample_seed", cfg.get("project.seed", 42)))
@@ -108,7 +116,7 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
     image_ids = [s["image_id"] for s in selection]
 
     clip_by, low_by = predict_condition_embeddings(
-        model, cfg, dm, selection, conditions, split, device, sample_seed)
+        model, cfg, dm, selection, brain_conditions, split, device, sample_seed)
 
     size = int(cfg.get("features.vae_image_size", 512))
     reals = [load_image(s["image_path"]).resize((size, size)) for s in selection]
@@ -116,6 +124,9 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
 
     generator = FrozenSDGenerator(cfg, device=device)
     clip_rescale = resolve_clip_rescale(cfg, dm, generator)
+    text_inputs = build_text_inputs(cfg, selection, split)
+    control_inputs = build_control_inputs(cfg, generator, selection, low_by, specs,
+                                          device)
     gen_seed = int(cfg.get("generation.seed", 123))
     gs = float(cfg.get("generation.guidance_scale", 3.0))
     steps = int(num_inference_steps or cfg.get("generation.num_inference_steps", 50))
@@ -129,20 +140,25 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
             generator.load_adapter(int(meta["clip_dim"]), ckpt_path)
         ck_dir = out_dir / label
         outputs = {"real": reals, "image_ids": image_ids}
-        for cond in conditions:
+        for spec in specs:
             init_images = None
-            if generator.use_img2img and low_by.get(cond) is not None:
-                init_images = lowlevel_init_images(cfg, generator, selection, low_by[cond])
+            src = spec.structural if spec.structural in low_by else spec.semantic
+            if generator.use_img2img and low_by.get(src) is not None:
+                init_images = lowlevel_init_images(cfg, generator, selection, low_by[src])
+            text = None if not text_inputs or text_inputs.get(spec.text) is None                 else text_inputs[spec.text]["embeds"]
+            controls = None if control_inputs is None else control_inputs[spec.structural]
             images = generator.generate(
-                clip_by[cond], seed=gen_seed, guidance_scale=gs,
-                num_inference_steps=steps, init_images=init_images, strength=strength)
-            outputs[cond] = images
+                clip_by[spec.semantic], seed=gen_seed, guidance_scale=gs,
+                num_inference_steps=steps, init_images=init_images, strength=strength,
+                text_embeds=text, control_images=controls,
+                controlnet_scale=_condition_scale(cfg, spec))
+            outputs[spec.name] = images
             if save_images:
-                save_condition_images(images, ck_dir / cond, image_ids)
+                save_condition_images(images, ck_dir / spec.name, image_ids)
 
             res = compute_generation_metrics(reals, images, clip_bundle, device, ks=(1, 5))
             m = res["metrics"]
-            rows.append({"checkpoint": label, "epoch": epoch, "condition": cond,
+            rows.append({"checkpoint": label, "epoch": epoch, "condition": spec.name,
                         "mean_clip_similarity": m["mean_clip_similarity"],
                         "median_clip_similarity": m["median_clip_similarity"],
                         "clip_top1": m["clip_retrieval"].get("top1"),
@@ -151,7 +167,7 @@ def sweep_adapter_checkpoints(cfg, decoder_checkpoint,
         images_by_checkpoint[label] = outputs
         if save_images:
             save_comparison_grid(outputs, ck_dir / "comparison_grid.png",
-                                 column_order=("real",) + tuple(conditions))
+                                 column_order=("real",) + tuple(s.name for s in specs))
 
     summary = pd.DataFrame(rows)
     summary.to_csv(out_dir / "checkpoint_sweep_summary.csv", index=False)

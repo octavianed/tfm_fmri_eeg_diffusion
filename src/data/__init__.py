@@ -14,6 +14,10 @@ from .eeg_things_dataset import (EegDataset, EegSubjectData,
                                  resolve_eeg_subjects)
 from .eeg_datamodule import EegDataModule
 from .factory import build_datamodule
+from .captions import (build_prompt, build_split_prompts, caption_permutation,
+                       captions_dir, load_caption_metadata, permuted_prompts,
+                       resolve_caption_field, resolve_template, text_mode,
+                       validate_caption_alignment)
 
 __all__ = [
     "discover_subjects", "resolve_subjects", "selection_tag", "subject_dir",
@@ -24,4 +28,7 @@ __all__ = [
     "EegNormalizer", "EegDataset", "EegSubjectData", "discover_eeg_subjects",
     "resolve_eeg_subjects", "eeg_selection_tag", "EegDataModule",
     "build_datamodule", "image_level_split", "train_image_indices",
+    "load_caption_metadata", "resolve_caption_field", "resolve_template",
+    "text_mode", "build_prompt", "build_split_prompts", "permuted_prompts",
+    "caption_permutation", "captions_dir", "validate_caption_alignment",
 ]

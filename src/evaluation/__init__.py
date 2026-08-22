@@ -9,6 +9,9 @@ from .ablation_eval import (conclusion_from_summary, evaluate_ablation,
                             save_ablation_figures)
 from .generation_metrics import (clip_pairwise_similarity,
                                  compute_generation_metrics, pixel_mse)
+from .generation_ablation import (DELTA_DEFINITIONS, build_report,
+                                  compute_deltas, conclusion, paired_test,
+                                  score_conditions)
 
 __all__ = [
     "compute_retrieval_metrics", "topk_candidates",
@@ -18,4 +21,6 @@ __all__ = [
     "conclusion_from_summary", "make_condition_input", "sattolo_derangement",
     "save_ablation_figures",
     "compute_generation_metrics", "clip_pairwise_similarity", "pixel_mse",
+    "score_conditions", "compute_deltas", "paired_test", "conclusion",
+    "build_report", "DELTA_DEFINITIONS",
 ]

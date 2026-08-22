@@ -152,6 +152,10 @@ predicted low-level PCA vector to a VAE latent and use it as an img2img
 initialization; and `adapter_lowlevel` (B semantics + C structure). Weak/empty
 prompts are used so the fMRI-derived signal is not masked by text.
 
+Since the multimodal extension (§12) the condition can additionally include text
+tokens and ControlNet residuals; `generation.conditioning_architecture` defaults
+to `legacy_adapter`, i.e. exactly the behaviour described above.
+
 ## 6. Outputs
 
 ```
@@ -161,8 +165,14 @@ outputs/<experiment>/
   metrics/*.{json,csv}   figures/*.png
   embeddings/*.npy       lowlevel/*.npy
   generated/{real,correct,permuted,zero}/*.png   grids/*.png
-  metadata/generation_params.json   report/*.md
+  metadata/{generation_params.json, generation_samples.json}   report/*.md
 ```
+
+With the multimodal extension, `generated/` also holds the extra conditions
+(`permuted_text`, `semantic_*`, `lowlevel_*`), `metrics/generation_deltas.csv`
+holds the paired deltas, and `metadata/generation_samples.json` holds one record
+per (sample, condition) with everything needed to rebuild that exact image
+(resolved prompt, brain/text condition, seeds, ControlNet scale, ...).
 
 Aggregated metrics carry `metric_name, condition, subject_id, split, value,
 seed, checkpoint` (spec §16.3). `metrics/conclusion.json` (Exp 2) and
@@ -189,9 +199,9 @@ src/models  fMRIEncoder, EEGEncoderTemporalConv, CLIP/LowLevel heads, adapters, 
 src/losses  cosine, InfoNCE contrastive, multitask combination
 src/training train/val loops + full checkpoint & resume
 src/evaluation retrieval, embedding, ablation (correct/permuted/zero), baselines, generation metrics
-src/generation frozen-SD pipeline, adapter training, generate-from-brain, grids
+src/generation frozen-SD pipeline, conditioning architectures, ControlNet conditions, adapter training, generate-from-brain, grids
 src/utils   config, seeding/RNG, device/AMP, logging, paths, checkpointing
-scripts/    00–08 CLI entry points (modality via --config)   notebooks/{fMRI,EEG}/ 00–06 + 30_multimodal
+scripts/    00–16 CLI entry points (modality via --config)   notebooks/{fMRI,EEG}/ 00–06 + 30_multimodal
 ```
 
 ## 9. Reproducibility
@@ -287,3 +297,69 @@ the metadata (`00`), then retrain Exp1/Exp2/Exp3 and regenerate images + Exp5.
 stimulus images, and with an unchanged split they stay aligned by `feat_idx`, so
 they are shared across every variant. The **token adapter is not retrained**
 either: it maps CLIP embeddings to VAE latents and never sees the EEG.
+
+## 12. Multimodal extension: text prompts + ControlNet
+
+The generation stage can optionally be conditioned on a caption of the seen
+image and on a pretrained ControlNet. Full details in
+[docs/08](docs/08_ampliacion_multimodal_texto_y_controlnet.md).
+
+Three architectures, chosen with `generation.conditioning_architecture`:
+
+| value | condition fed to the frozen UNet |
+|---|---|
+| `legacy_adapter` *(default)* | `[K neural tokens]` — the previous behaviour, no caption at all |
+| `text_adapter_concat` | `[77 text tokens ; K neural tokens]` via cross-attention |
+| `text_adapter_concat_controlnet` | the above **plus** frozen ControlNet residuals from `low_pred` |
+
+ControlNet does **not** replace the concatenation: text and neural tokens keep
+arriving through cross-attention while ControlNet adds spatial residuals built
+from `low_pred → inverse PCA → VAE decode → Canny`. The **TokenAdapter is still
+the only trainable module**; the ControlNet is pretrained and frozen.
+
+```bash
+# Architecture 1 — weak text (the textual baseline)
+python scripts/13_precompute_text_embeddings.py --config configs/fMRI/exp04_generation_text_weak.yaml
+python scripts/06_generate_images.py            --config configs/fMRI/exp04_generation_text_weak.yaml --train-adapter
+python scripts/07_eval_generation_ablation.py   --config configs/fMRI/exp05_generation_text_weak_ablation.yaml
+
+# Architecture 2 — + ControlNet
+python scripts/14_precompute_controlnet_conditions.py --config configs/fMRI/exp04_generation_controlnet_weak.yaml
+python scripts/06_generate_images.py                  --config configs/fMRI/exp04_generation_controlnet_weak.yaml --train-adapter
+python scripts/16_sweep_controlnet_scale.py           --config configs/fMRI/exp04_generation_controlnet_weak.yaml
+
+# Minimum tests (seconds, CPU, no Stable Diffusion)
+python scripts/15_validate_multimodal.py --config configs/fMRI/exp04_generation_text_weak.yaml
+```
+
+**Text modes.** `generation.text.mode: none | weak | oracle` resolves to
+`prompt_categories` / `primary_caption` for fMRI and to `primary_caption` for
+EEG — so in EEG **oracle == weak** (THINGS-EEG2 has no more detailed caption);
+do not report it as a more informative condition. `weak` is the textual
+*baseline*; `oracle` is a performance ceiling.
+
+**What the extension measures.** Beyond `correct ≫ permuted ≈ zero`, Experiment 5
+now writes `metrics/generation_deltas.csv` with `delta_brain` (text fixed, brain
+permuted), `delta_text` (brain fixed, caption permuted) and — for the ControlNet
+architecture — `delta_semantic` and `delta_lowlevel`, which separate the
+contribution of the CLIP branch from that of the VAE-PCA branch. A detailed
+caption is *expected* to shrink `delta_brain`: that is informative about the
+text, not a failure of the decoder.
+
+**Permuted captions** are a Sattolo derangement with seed 42 drawn **within each
+`(subject, split)` and within the same caption family**, using the very same
+helper as the brain permutation. The `permuted_caption_seed42` column shipped in
+the CSVs is *not* used by default: it was shuffled over the whole dataset split
+(mixing this project's train and val) and has no counterpart for the weak fMRI
+family.
+
+**Checkpoints are not interchangeable.** Every adapter checkpoint stores its
+conditioning identity (architecture, text mode, caption field, template, `K`,
+ControlNet model/type); loading it under a different one fails with an explicit
+error unless `generation.allow_incompatible_adapter: true` (smoke tests only).
+
+**EEG preprocessing ablations stay compatible.** Captions, text embeddings,
+ControlNet conditions and the adapter itself depend only on the images and the
+split — never on the EEG — so a single cache and a single adapter serve every
+variant of §11; only Exp4/Exp5 are re-run. Ready-made configs:
+`configs/EEG/exp04_raw_<variant>_generation_text_weak.yaml`.

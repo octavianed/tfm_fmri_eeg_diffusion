@@ -8,5 +8,6 @@ from __future__ import annotations
 from .train_multitask_decoder import run_training
 
 
-def train_clip(cfg, resume=None) -> dict:
-    return run_training(cfg, use_lowlevel=False, resume=resume)
+def train_clip(cfg, resume=None, eval_only: bool = False) -> dict:
+    return run_training(cfg, use_lowlevel=False, resume=resume,
+                        eval_only=eval_only)
