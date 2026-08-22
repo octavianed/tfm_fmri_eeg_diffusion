@@ -2,7 +2,15 @@
 """Experiment 4: generate images with a frozen Stable Diffusion pipeline (spec §13.7).
 
 Optionally trains the (only) trainable module — the token adapter — then
-generates images for the fMRI correct / permuted / zero conditions."""
+generates images for every configured condition. The condition set follows
+``generation.conditioning_architecture``:
+
+* ``legacy_adapter`` — correct / permuted / zero (brain only);
+* ``text_adapter_concat`` — the above with the caption fixed, plus
+  ``permuted_text`` (correct brain, permuted caption);
+* ``text_adapter_concat_controlnet`` — the above plus the semantic/low-level
+  single-branch ablations of §23.
+"""
 import argparse
 import os
 import sys
@@ -11,7 +19,9 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data import build_datamodule  # noqa: E402
-from src.generation import generate_images, train_token_adapter  # noqa: E402
+from src.generation import (conditioning_metadata, describe_conditions,  # noqa: E402
+                            generate_images, resolve_conditions,
+                            train_token_adapter)
 from src.utils import (get_experiment_paths, ExtendOverrides, get_logger, load_config)  # noqa: E402
 
 
@@ -22,7 +32,10 @@ def resolve_decoder(cfg, explicit):
     if ck:
         return Path(ck)
     out = Path(cfg.get("paths.output_dir", "outputs"))
-    for name in ("exp03_lowlevel_multitask", "exp01_fmri_to_clip"):
+    # Includes the renamed fMRI experiment; EEG/multimodal configs set
+    # generation.decoder_checkpoint explicitly, so this is only a fallback.
+    for name in ("exp03_fmri_lowlevel_multitask", "exp03_lowlevel_multitask",
+                 "exp01_fmri_to_clip"):
         cand = out / name / "checkpoints" / "best.pt"
         if cand.exists():
             return cand
@@ -43,8 +56,13 @@ def main():
     log = get_logger("generate")
 
     cfg = load_config(args.config, args.set)
-    conditions = args.conditions or list(cfg.get("generation.conditions",
-                                                 ["correct", "permuted", "zero"]))
+    meta = conditioning_metadata(cfg)
+    log.info("Architecture: %s | text: %s%s | controlnet: %s",
+             meta["conditioning_architecture"], meta["text_mode"],
+             f" ({meta['caption_field']})" if meta["caption_field"] else "",
+             meta["controlnet_model"] or "off")
+    conditions = args.conditions or None
+    log.info("Conditions: %s", describe_conditions(resolve_conditions(cfg, conditions)))
     adapter_ckpt = args.adapter_checkpoint
 
     if args.train_adapter or bool(cfg.get("generation.train_adapter", False)):

@@ -140,6 +140,40 @@ def vae_pca_feature_path(cfg, subject: str, split: str) -> Path:
     return d / f"{subject}_{split}_pca.npy"
 
 
+def text_embedding_dir(cfg, modality: str, text_encoder: str,
+                       caption_field: str, cache_hash: str) -> Path:
+    """Cache root of the SD text-encoder embeddings of the caption prompts.
+
+    Layout: ``data/features/text/<modality>/<text_encoder>/<caption_field>/<hash>/``.
+    The hash covers template/tokenizer/max_length/... (see
+    :func:`src.features.text_embeddings.text_cache_signature`), so two
+    incompatible prompt setups can never share a directory (§11.1).
+
+    Deliberately independent of the EEG preprocessing variant: prompts depend
+    only on the images and the split, exactly like the CLIP/VAE features, so all
+    raw-preprocessing ablations share one cache.
+    """
+    return (features_dir(cfg) / "text" / _safe(modality) / _safe(text_encoder)
+            / _safe(caption_field) / _safe(cache_hash))
+
+
+def controlnet_condition_dir(cfg, condition_type: str, subject: str,
+                             split: str) -> Path:
+    """Cache of the ControlNet spatial conditions derived from the GT VAE-PCA.
+
+    Namespaced by ``features.vae_model`` and ``features.pca_dim`` because the
+    condition is computed *after* the PCA bottleneck — a different VAE or a
+    different number of components produces a different coarse reconstruction,
+    hence different edges.
+    """
+    model = _safe(cfg.get("features.vae_model", "sd-v1-5"))
+    pca_dim = int(cfg.get("features.pca_dim", 512))
+    d = (features_dir(cfg) / "controlnet" / _safe(condition_type)
+         / f"{model}_pca{pca_dim}" / _safe(subject) / _safe(split))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def vae_pca_model_path(cfg, subject: str) -> Path:
     # Namespaced by features.vae_model (like vae_latent_path/vae_pca_feature_path)
     # so fitting PCA against a different VAE/SD backbone (e.g. switching from

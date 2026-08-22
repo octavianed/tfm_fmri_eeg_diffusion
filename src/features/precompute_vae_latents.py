@@ -26,17 +26,34 @@ from .precompute_clip_embeddings import ImagePathDataset
 logger = get_logger("precompute_vae")
 
 
-def load_vae(cfg, device):
+def load_vae(cfg, device, dtype=None, slicing: bool = False):
+    """Frozen SD VAE.
+
+    ``dtype=None`` keeps the historical float32 load — do NOT change it for the
+    *encoding* path (``precompute_vae_latents``), because the cached latents and
+    the PCA fitted on them were produced in float32.
+
+    Decoding (64x64 -> 512x512) is a different story: it is ~10x heavier than
+    encoding and in float32 it is what made the ControlNet-condition precompute
+    thrash. Pass ``dtype=torch.float16`` + ``slicing=True`` there — it also
+    matches inference, where the SD pipeline runs its VAE in fp16 on CUDA.
+    """
     from diffusers import AutoencoderKL
     name = str(cfg.get("features.vae_model",
                        "stable-diffusion-v1-5/stable-diffusion-v1-5"))
+    kwargs = {"torch_dtype": dtype} if dtype is not None else {}
     try:
-        vae = AutoencoderKL.from_pretrained(name, subfolder="vae")
+        vae = AutoencoderKL.from_pretrained(name, subfolder="vae", **kwargs)
     except Exception:
-        vae = AutoencoderKL.from_pretrained(name)
+        vae = AutoencoderKL.from_pretrained(name, **kwargs)
     vae.eval().to(device)
     for p in vae.parameters():
         p.requires_grad_(False)
+    if slicing:
+        # Decode one image at a time internally: peak memory stops depending on
+        # the batch size, so a large features.vae_batch_size can no longer push
+        # the allocator into system RAM.
+        vae.enable_slicing()
     return vae
 
 

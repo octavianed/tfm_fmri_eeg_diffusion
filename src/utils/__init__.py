@@ -6,10 +6,12 @@ from .seed import get_rng_state, seed_worker, set_rng_state, set_seed
 from .device import (amp_dtype, autocast, count_parameters, cuda_mem_summary,
                      get_device, make_grad_scaler)
 from .logging import (CSVLogger, JsonlLogger, get_logger, load_json, save_json)
-from .paths import (ExperimentPaths, clip_feature_path, eeg_preproc_dir,
-                    experiment_dir, get_experiment_paths, metadata_path,
-                    normalization_path, vae_latent_path, vae_pca_feature_path,
+from .paths import (ExperimentPaths, clip_feature_path,
+                    controlnet_condition_dir, eeg_preproc_dir, experiment_dir,
+                    get_experiment_paths, metadata_path, normalization_path,
+                    text_embedding_dir, vae_latent_path, vae_pca_feature_path,
                     vae_pca_model_path)
+from .permutation import derangement, sattolo_derangement
 from .checkpointing import (CheckpointManager, collect_library_versions,
                             load_checkpoint, save_checkpoint)
 
@@ -22,6 +24,8 @@ __all__ = [
     "load_json", "ExperimentPaths", "get_experiment_paths", "experiment_dir",
     "metadata_path", "normalization_path", "clip_feature_path", "eeg_preproc_dir",
     "vae_latent_path", "vae_pca_feature_path", "vae_pca_model_path",
+    "text_embedding_dir", "controlnet_condition_dir",
+    "derangement", "sattolo_derangement",
     "CheckpointManager", "save_checkpoint", "load_checkpoint",
     "collect_library_versions",
 ]

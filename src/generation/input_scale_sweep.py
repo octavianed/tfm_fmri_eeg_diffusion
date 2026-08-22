@@ -26,8 +26,12 @@ from ..evaluation.generation_metrics import compute_generation_metrics
 from ..features.clip_model import load_clip
 from ..utils import get_device, get_experiment_paths, get_logger, save_json
 from .checkpoint_sweep import margin_table
-from .generate_from_fmri import (load_decoder, lowlevel_init_images,
+from .conditioning import required_brain_conditions, resolve_conditions
+from .generate_from_fmri import (_condition_scale, build_control_inputs,
+                                 build_text_inputs, load_decoder,
+                                 lowlevel_init_images,
                                  predict_condition_embeddings,
+                                 resolve_adapter_checkpoint,
                                  resolve_clip_rescale, save_condition_images,
                                  select_samples)
 from .make_grids import save_comparison_grid
@@ -71,6 +75,12 @@ def sweep_adapter_input_scale(cfg, decoder_checkpoint, adapter_checkpoint=None,
     if not scales:
         raise ValueError("No scales to sweep")
 
+    # Resolve the conditions the SAME way Exp4 does, so a text/ControlNet
+    # architecture is swept with its real conditioning (otherwise the positive
+    # CFG branch would be missing the text half and the run would abort).
+    specs = resolve_conditions(cfg, conditions)
+    brain_conditions = required_brain_conditions(specs)
+
     dm = build_datamodule(cfg).prepare()
     model, meta = load_decoder(cfg, dm, decoder_checkpoint, device)
     sample_seed = int(cfg.get("generation.sample_seed", cfg.get("project.seed", 42)))
@@ -78,7 +88,7 @@ def sweep_adapter_input_scale(cfg, decoder_checkpoint, adapter_checkpoint=None,
     image_ids = [s["image_id"] for s in selection]
 
     clip_by, low_by = predict_condition_embeddings(
-        model, cfg, dm, selection, conditions, split, device, sample_seed)
+        model, cfg, dm, selection, brain_conditions, split, device, sample_seed)
 
     size = int(cfg.get("features.vae_image_size", 512))
     reals = [load_image(s["image_path"]).resize((size, size)) for s in selection]
@@ -86,8 +96,7 @@ def sweep_adapter_input_scale(cfg, decoder_checkpoint, adapter_checkpoint=None,
 
     generator = FrozenSDGenerator(cfg, device=device)
     clip_rescale = resolve_clip_rescale(cfg, dm, generator)
-    adapter_ck = adapter_checkpoint or cfg.get(
-        "generation.adapter_checkpoint", str(paths.checkpoints / "adapter_best.pt"))
+    adapter_ck = resolve_adapter_checkpoint(cfg, paths, adapter_checkpoint)
     generator.load_adapter(int(meta["clip_dim"]), adapter_ck)
 
     if not getattr(generator.adapter, "normalize_input", False):
@@ -99,12 +108,17 @@ def sweep_adapter_input_scale(cfg, decoder_checkpoint, adapter_checkpoint=None,
             "generation.rescale_clip_pred (Option A) to change the effective "
             "conditioning strength of a plain adapter.")
 
+    text_inputs = build_text_inputs(cfg, selection, split)
+    control_inputs = build_control_inputs(cfg, generator, selection, low_by, specs,
+                                          device)
+
     gen_seed = int(cfg.get("generation.seed", 123))
     gs = float(cfg.get("generation.guidance_scale", 3.0))
     steps = int(num_inference_steps or cfg.get("generation.num_inference_steps", 50))
     strength = float(cfg.get("generation.strength", 0.8))
     logger.info("Sweeping adapter_input_scale over %s | adapter=%s | %d samples, "
-                "%d steps", scales, adapter_ck, len(selection), steps)
+                "%d steps, conditions=%s", scales, adapter_ck, len(selection), steps,
+                [s.name for s in specs])
 
     rows, images_by_scale = [], {}
     for scale in scales:
@@ -113,31 +127,37 @@ def sweep_adapter_input_scale(cfg, decoder_checkpoint, adapter_checkpoint=None,
         logger.info("  input_scale=%g", scale)
         sc_dir = out_dir / label
         outputs = {"real": reals, "image_ids": image_ids}
-        for cond in conditions:
+        for spec in specs:
             init_images = None
-            if generator.use_img2img and low_by.get(cond) is not None:
-                init_images = lowlevel_init_images(cfg, generator, selection, low_by[cond])
+            src = spec.structural if spec.structural in low_by else spec.semantic
+            if generator.use_img2img and low_by.get(src) is not None:
+                init_images = lowlevel_init_images(cfg, generator, selection, low_by[src])
+            text = None if not text_inputs or text_inputs.get(spec.text) is None \
+                else text_inputs[spec.text]["embeds"]
+            controls = None if control_inputs is None else control_inputs[spec.structural]
             images = generator.generate(
-                clip_by[cond], seed=gen_seed, guidance_scale=gs,
-                num_inference_steps=steps, init_images=init_images, strength=strength)
-            outputs[cond] = images
+                clip_by[spec.semantic], seed=gen_seed, guidance_scale=gs,
+                num_inference_steps=steps, init_images=init_images, strength=strength,
+                text_embeds=text, control_images=controls,
+                controlnet_scale=_condition_scale(cfg, spec))
+            outputs[spec.name] = images
             if save_images:
-                save_condition_images(images, sc_dir / cond, image_ids)
+                save_condition_images(images, sc_dir / spec.name, image_ids)
 
             res = compute_generation_metrics(reals, images, clip_bundle, device, ks=(1, 5))
             m = res["metrics"]
-            rows.append({"input_scale": scale, "condition": cond,
+            rows.append({"input_scale": scale, "condition": spec.name,
                          "mean_clip_similarity": m["mean_clip_similarity"],
                          "median_clip_similarity": m["median_clip_similarity"],
                          "clip_top1": m["clip_retrieval"].get("top1"),
                          "clip_top5": m["clip_retrieval"].get("top5"),
                          "mean_pixel_mse": m.get("mean_pixel_mse")})
-            logger.info("    %-9s clip_sim=%.4f top1=%.3f", cond,
+            logger.info("    %-18s clip_sim=%.4f top1=%.3f", spec.name,
                         m["mean_clip_similarity"], m["clip_retrieval"].get("top1"))
         images_by_scale[label] = outputs
         if save_images:
             save_comparison_grid(outputs, sc_dir / "comparison_grid.png",
-                                 column_order=("real",) + tuple(conditions))
+                                 column_order=("real",) + tuple(s.name for s in specs))
 
     summary = pd.DataFrame(rows)
     summary.to_csv(out_dir / "input_scale_sweep_summary.csv", index=False)

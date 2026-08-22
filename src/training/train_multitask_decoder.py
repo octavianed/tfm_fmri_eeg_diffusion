@@ -8,7 +8,6 @@ never loads Stable Diffusion (spec §4, §7.5, §17).
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 import numpy as np
 
@@ -40,14 +39,22 @@ def _current_lr(optimizer) -> float:
     return float(optimizer.param_groups[0]["lr"])
 
 
-def run_training(cfg, use_lowlevel: bool = False, resume=None) -> dict:
+def run_training(cfg, use_lowlevel: bool = False, resume=None,
+                 eval_only: bool = False) -> dict:
+    """Train the decoder, then evaluate ``best.pt`` on val/test.
+
+    ``eval_only=True`` skips training entirely and just runs the final
+    evaluation from the existing ``best.pt`` — useful when a run finished but
+    the final evaluation failed, so the (expensive) training is not repeated.
+    """
     set_seed(int(cfg.get("project.seed", 42)),
              deterministic=bool(cfg.get("runtime.deterministic", False)))
     device = get_device(cfg.get("runtime.device", "auto"))
     paths = get_experiment_paths(cfg, ensure=True)
     save_config(cfg, paths.root / "config.yaml")
-    logger.info("Experiment dir: %s | device: %s | lowlevel: %s",
-                paths.root, device, use_lowlevel)
+    logger.info("Experiment dir: %s | device: %s | lowlevel: %s%s",
+                paths.root, device, use_lowlevel,
+                " | EVAL ONLY" if eval_only else "")
 
     dm = build_datamodule(cfg).prepare()
     clip_dim = tu.peek_feature_dim(cfg, dm, "clip", "train")
@@ -67,6 +74,16 @@ def run_training(cfg, use_lowlevel: bool = False, resume=None) -> dict:
     loss_fn = build_loss(cfg, use_lowlevel=use_lowlevel)
 
     kinds = ("clip", "low") if use_lowlevel else ("clip",)
+    if eval_only:
+        ckpt = CheckpointManager(paths.checkpoints)
+        if not ckpt.best_path.exists():
+            raise FileNotFoundError(
+                f"--eval-only needs a trained checkpoint at {ckpt.best_path}")
+        result = _finalize(cfg, model, dm, loss_fn, device, paths, use_lowlevel,
+                           ckpt)
+        tu.save_training_figures(paths.train_log, paths.figures)
+        return result
+
     train_loader = dm.build_dataloader("train", shuffle=True, kinds=kinds)
     val_loader = dm.build_dataloader("val", shuffle=False, kinds=kinds)
     steps_per_epoch = max(1, len(train_loader))
@@ -178,14 +195,25 @@ def _finalize(cfg, model, dm, loss_fn, device, paths, use_lowlevel, ckpt) -> dic
                     ckpt.best_path)
         best = load_checkpoint(ckpt.best_path, map_location=device)
         model.load_state_dict(best["model_state_dict"], strict=False)
+        # Drop the checkpoint (~2.9 GB: weights + AdamW state) BEFORE building the
+        # eval loaders. Keeping it alive while DataLoader workers are spawned was
+        # enough extra RAM pressure to make the Windows spawn pipe fail with
+        # "OSError: [Errno 22] Invalid argument" right after training finished.
+        del best
 
     out = {"experiment_dir": str(paths.root), "metrics": {}}
     for split in ("val", "test"):
         frame = dm.get_frame(split)
         if len(frame) == 0:
             continue
+        # num_workers=0 on purpose. The final evaluation is a single pass, while
+        # each worker process re-pickles the whole dataset — and the fMRI reader
+        # holds memory-mapped arrays that pickle BY VALUE (measured: 1.56 GB for
+        # subj01). On Windows (spawn) that is several GB pushed down a pipe per
+        # worker: slow at best, and a hard OSError at worst. Reading straight
+        # from the memmap in the main process is both safer and faster here.
         loader = dm.build_dataloader(
-            split, shuffle=False,
+            split, shuffle=False, num_workers=0,
             kinds=("clip", "low") if use_lowlevel else ("clip",))
         val_metrics, (preds, targets, _subs) = tu.validate(
             model, loader, loss_fn, device, cfg, use_lowlevel)
@@ -277,5 +305,6 @@ def _write_summary(cfg, paths, out, use_lowlevel) -> None:
     (paths.report / "summary.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def train_multitask(cfg, resume=None) -> dict:
-    return run_training(cfg, use_lowlevel=True, resume=resume)
+def train_multitask(cfg, resume=None, eval_only: bool = False) -> dict:
+    return run_training(cfg, use_lowlevel=True, resume=resume,
+                        eval_only=eval_only)
