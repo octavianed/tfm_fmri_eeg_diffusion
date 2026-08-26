@@ -215,10 +215,12 @@ def fig_eeg_preproc(dec):
 def fig_comparativa(dec):
     sel = ["fMRI (NSD)", "Oficial 17 ch", "Oficial 63 ch", "Propio: baseline",
            "Propio: temporal 100-600", "Propio: temporal 200-400"]
-    d = dec[dec.linea.isin(sel)].set_index("linea").loc[sel].reset_index()
+    d = (dec[dec.linea.isin(sel)]
+         .sort_values("razon_sobre_azar", ascending=False))
     fig, ax = plt.subplots(figsize=(7.6, 4.4))
     bars = ax.bar(d["linea"], d["razon_sobre_azar"],
-                  color=["#1b7837"] + ["#2c7fb8"] * 4)
+                  color=["#1b7837" if linea == "fMRI (NSD)" else "#2c7fb8"
+                         for linea in d["linea"]])
     ax.axhline(1, ls="--", lw=1, color="black")
     ax.set_yscale("log")
     ax.set_ylabel("Top-5 / azar (escala logaritmica)")
