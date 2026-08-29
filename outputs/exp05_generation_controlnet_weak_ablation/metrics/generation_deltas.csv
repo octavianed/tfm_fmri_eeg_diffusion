@@ -1,0 +1,10 @@
+delta,positive,negative,metric,question,value,t_pvalue,wilcoxon_pvalue,n
+delta_correct_permuted,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.044248158733050026,1.177650884510521e-10,1.4037384714845396e-09,159
+delta_correct_zero,correct,zero,clip_similarity,¿la señal cerebral correcta supera al control nulo?,0.05167463693603779,6.870192670676714e-13,5.821785129677739e-12,159
+delta_text,correct,permuted_text,clip_similarity,"con cerebro correcto, ¿aporta el caption correcto frente al permutado?",0.09720923821881132,1.2932189635558197e-27,6.110036851933665e-22,159
+delta_semantic,correct,semantic_permuted,clip_similarity,"con ControlNet correcta, ¿aporta el CLIP cerebral?",0.04134119690964057,3.04148542806278e-10,7.682460316833752e-10,159
+delta_semantic_zero,correct,semantic_zero,clip_similarity,"con ControlNet correcta, ¿aporta el CLIP cerebral frente al nulo?",0.042886021564591606,1.090448997221707e-11,1.0527264374860414e-10,159
+delta_lowlevel,correct,lowlevel_permuted,clip_similarity,"con pseudo-tokens correctos, ¿aporta la predicción VAE-PCA cerebral?",0.011187798946908434,0.008428504425622861,0.026999206316116593,159
+delta_lowlevel_zero,correct,lowlevel_zero,clip_similarity,"con pseudo-tokens correctos, ¿aporta la ControlNet frente a desactivarla?",-0.016368073206277763,0.00034078020036359843,0.0005830215936856789,159
+delta_brain,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.044248158733050026,1.177650884510521e-10,1.4037384714845396e-09,159
+delta_joint_brain,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.044248158733050026,1.177650884510521e-10,1.4037384714845396e-09,159

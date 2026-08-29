@@ -1,0 +1,5 @@
+delta,positive,negative,metric,question,value,t_pvalue,wilcoxon_pvalue,n
+delta_correct_permuted,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.10485830640642897,1.5083758261400438e-29,1.815749688049639e-21,159
+delta_correct_zero,correct,zero,clip_similarity,¿la señal cerebral correcta supera al control nulo?,0.10268650358577944,1.1235018807918888e-32,1.348983665448377e-23,159
+delta_brain,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.10485830640642897,1.5083758261400438e-29,1.815749688049639e-21,159
+delta_joint_brain,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.10485830640642897,1.5083758261400438e-29,1.815749688049639e-21,159
