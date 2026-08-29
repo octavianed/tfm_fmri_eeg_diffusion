@@ -1,0 +1,13 @@
+{
+  "decision": "brain_not_clearly_used",
+  "metric": "mean_clip_similarity",
+  "correct": 0.5971261262893677,
+  "best_control": 0.6064699292182922,
+  "margin": -0.00934380292892456,
+  "values": {
+    "correct": 0.5971261262893677,
+    "permuted": 0.5922408699989319,
+    "zero": 0.6064699292182922
+  },
+  "message": "La generaci\u00f3n con se\u00f1al cerebral correcta NO supera claramente a permutado/cero: no se puede atribuir la reconstrucci\u00f3n a la se\u00f1al cerebral real."
+}

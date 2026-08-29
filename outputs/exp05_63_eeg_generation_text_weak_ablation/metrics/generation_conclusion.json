@@ -1,0 +1,14 @@
+{
+  "decision": "brain_used",
+  "metric": "mean_clip_similarity",
+  "correct": 0.6802207827568054,
+  "best_control": 0.6686881184577942,
+  "margin": 0.01153266429901123,
+  "values": {
+    "correct": 0.6802207827568054,
+    "permuted": 0.6686881184577942,
+    "zero": 0.6561682224273682,
+    "permuted_text": 0.6031744480133057
+  },
+  "message": "La generaci\u00f3n con se\u00f1al cerebral correcta supera a los controles: hay evidencia de que la se\u00f1al cerebral influye en la reconstrucci\u00f3n."
+}

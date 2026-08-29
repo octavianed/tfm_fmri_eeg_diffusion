@@ -1,0 +1,39 @@
+config,modalidad,arquitectura,condicion,similitud_pp,similitud_mediana_pp,top1_%,top5_%,mse_pixel,ssim,lpips
+Af,fMRI,A - solo cerebro,Correcta,68.5062,67.8084,13.8365,43.3962,0.1316,0.1316,0.7322
+Af,fMRI,A - solo cerebro,Permutada,58.0204,58.3356,2.5157,5.6604,0.1388,0.1176,0.7821
+Af,fMRI,A - solo cerebro,Nula,58.2376,57.5309,0.6289,3.1447,0.1274,0.0886,0.7497
+Bf,fMRI,B - texto + cerebro,Correcta,72.5355,72.9931,25.7862,62.8931,0.1252,0.1371,0.7162
+Bf,fMRI,B - texto + cerebro,Permutada,62.363,61.4037,5.6604,18.239,0.1292,0.1222,0.76
+Bf,fMRI,B - texto + cerebro,Nula,60.9365,60.3363,8.805,21.3836,0.1309,0.1047,0.7324
+Bf,fMRI,B - texto + cerebro,Texto permutado,63.9398,63.561,5.0314,20.7547,0.1274,0.13,0.7358
+Cf,fMRI,C - + ControlNet,Correcta,70.019,70.494,16.9811,40.8805,0.1134,0.1331,0.7397
+Cf,fMRI,C - + ControlNet,Permutada,65.5941,65.5186,9.434,25.7862,0.1177,0.1174,0.7639
+Cf,fMRI,C - + ControlNet,Nula,64.8515,63.7166,9.434,36.478,0.1328,0.0978,0.7477
+Cf,fMRI,C - + ControlNet,Texto permutado,60.298,60.181,1.8868,8.1761,0.1168,0.117,0.7559
+Cf,fMRI,C - + ControlNet,Semantica permutada,65.8848,66.096,10.6918,26.4151,0.1176,0.116,0.758
+Cf,fMRI,C - + ControlNet,Semantica nula,65.7304,65.3829,10.6918,27.673,0.1156,0.0979,0.7518
+Cf,fMRI,C - + ControlNet,Estructura permutada,68.9002,68.4473,15.0943,40.2516,0.1139,0.1341,0.7424
+Cf,fMRI,C - + ControlNet,Estructura nula,71.6558,72.4346,23.8994,57.2327,0.1259,0.1295,0.7287
+Ae,EEG 63,A - solo cerebro,Correcta,59.7126,59.5826,1.5,3.5,0.167,0.0296,0.8129
+Ae,EEG 63,A - solo cerebro,Permutada,59.2241,59.0134,0.0,2.5,0.1694,0.0268,0.819
+Ae,EEG 63,A - solo cerebro,Nula,60.647,60.9926,0.5,1.5,0.0793,0.2767,0.9128
+Be,EEG 63,B - texto + cerebro,Correcta,68.0221,66.7665,25.5,39.0,0.1329,0.0595,0.7229
+Be,EEG 63,B - texto + cerebro,Permutada,66.8688,65.2166,20.0,33.5,0.1335,0.0584,0.7281
+Be,EEG 63,B - texto + cerebro,Nula,65.6168,64.447,16.0,24.0,0.0913,0.204,0.8247
+Be,EEG 63,B - texto + cerebro,Texto permutado,60.3174,60.4237,0.5,3.5,0.1351,0.0565,0.7389
+Ce,EEG 63,C - + ControlNet,Correcta,71.774,72.5924,42.0,62.0,0.1137,0.0981,0.7353
+Ce,EEG 63,C - + ControlNet,Permutada,71.9193,72.2007,44.0,59.0,0.112,0.1023,0.7406
+Ce,EEG 63,C - + ControlNet,Nula,76.3313,77.6177,56.5,74.5,0.1092,0.1277,0.7327
+Ce,EEG 63,C - + ControlNet,Texto permutado,58.9446,59.1711,1.5,3.0,0.1169,0.099,0.7664
+Ce,EEG 63,C - + ControlNet,Semantica permutada,71.6953,72.5285,40.5,59.5,0.114,0.0988,0.7351
+Ce,EEG 63,C - + ControlNet,Semantica nula,72.045,72.6719,45.0,59.5,0.1258,0.09,0.748
+Ce,EEG 63,C - + ControlNet,Estructura permutada,72.1895,73.0367,44.5,62.5,0.1121,0.102,0.7389
+Ce,EEG 63,C - + ControlNet,Estructura nula,76.7077,77.8595,57.5,74.0,0.1106,0.1267,0.7312
+Ct,EEG 100-600,C - + ControlNet,Correcta,71.41,72.5664,40.5,59.0,0.1362,0.1024,0.7563
+Ct,EEG 100-600,C - + ControlNet,Permutada,71.5186,72.6833,43.5,61.0,0.1353,0.0971,0.755
+Ct,EEG 100-600,C - + ControlNet,Nula,76.6331,77.3859,57.0,72.0,0.1099,0.1262,0.7304
+Ct,EEG 100-600,C - + ControlNet,Texto permutado,59.614,59.3753,0.0,3.0,0.1355,0.0999,0.782
+Ct,EEG 100-600,C - + ControlNet,Semantica permutada,71.705,73.333,43.0,63.5,0.1362,0.1023,0.7534
+Ct,EEG 100-600,C - + ControlNet,Semantica nula,71.5578,72.334,44.5,61.5,0.1151,0.1068,0.7372
+Ct,EEG 100-600,C - + ControlNet,Estructura permutada,71.7063,73.1285,41.5,61.5,0.1367,0.0979,0.7558
+Ct,EEG 100-600,C - + ControlNet,Estructura nula,76.4897,77.3485,57.5,74.5,0.1088,0.1299,0.7345

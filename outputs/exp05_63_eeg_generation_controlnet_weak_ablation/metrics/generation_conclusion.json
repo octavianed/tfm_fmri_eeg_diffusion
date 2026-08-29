@@ -1,0 +1,18 @@
+{
+  "decision": "brain_not_clearly_used",
+  "metric": "mean_clip_similarity",
+  "correct": 0.717739999294281,
+  "best_control": 0.763313353061676,
+  "margin": -0.04557335376739502,
+  "values": {
+    "correct": 0.717739999294281,
+    "permuted": 0.7191929817199707,
+    "zero": 0.763313353061676,
+    "permuted_text": 0.5894458889961243,
+    "semantic_permuted": 0.7169529795646667,
+    "semantic_zero": 0.7204498052597046,
+    "lowlevel_permuted": 0.7218954563140869,
+    "lowlevel_zero": 0.7670765519142151
+  },
+  "message": "La generaci\u00f3n con se\u00f1al cerebral correcta NO supera claramente a permutado/cero: no se puede atribuir la reconstrucci\u00f3n a la se\u00f1al cerebral real."
+}

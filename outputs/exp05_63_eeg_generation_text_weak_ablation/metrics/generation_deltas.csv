@@ -1,0 +1,6 @@
+delta,positive,negative,metric,question,value,t_pvalue,wilcoxon_pvalue,n
+delta_correct_permuted,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.011532683372497559,0.03581244173868863,0.03023315799007624,200
+delta_correct_zero,correct,zero,clip_similarity,¿la señal cerebral correcta supera al control nulo?,0.024052579402923584,0.0047587055549213435,0.033137190030337764,200
+delta_text,correct,permuted_text,clip_similarity,"con cerebro correcto, ¿aporta el caption correcto frente al permutado?",0.0770463189482689,2.0759316326346978e-29,1.4724158742751246e-25,200
+delta_brain,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.011532683372497559,0.03581244173868863,0.03023315799007624,200
+delta_joint_brain,correct,permuted,clip_similarity,¿la señal cerebral correcta supera a la permutada?,0.011532683372497559,0.03581244173868863,0.03023315799007624,200

@@ -1,0 +1,58 @@
+{
+  "correct_vs_permuted": {
+    "n": 200,
+    "mean_diff": -0.0014530614018440247,
+    "std_diff": 0.06431409147698607,
+    "t_stat": -0.31951615800776945,
+    "t_pvalue": 0.749670315491367,
+    "wilcoxon_pvalue": 0.9309639632270188
+  },
+  "correct_vs_zero": {
+    "n": 200,
+    "mean_diff": -0.045573449283838274,
+    "std_diff": 0.06410315181935355,
+    "t_stat": -10.054199868822684,
+    "t_pvalue": 1.713502263767762e-19,
+    "wilcoxon_pvalue": 8.605199366021795e-18
+  },
+  "correct_vs_permuted_text": {
+    "n": 200,
+    "mean_diff": 0.12829406023025514,
+    "std_diff": 0.09664532416282617,
+    "t_stat": 18.77330347031161,
+    "t_pvalue": 6.382756822074656e-46,
+    "wilcoxon_pvalue": 3.632035390852315e-30
+  },
+  "correct_vs_semantic_permuted": {
+    "n": 200,
+    "mean_diff": 0.0007870118319988251,
+    "std_diff": 0.03176749620117729,
+    "t_stat": 0.3503589957207855,
+    "t_pvalue": 0.7264398618613627,
+    "wilcoxon_pvalue": 0.9980528920316095
+  },
+  "correct_vs_semantic_zero": {
+    "n": 200,
+    "mean_diff": -0.002709906846284866,
+    "std_diff": 0.05545097068574403,
+    "t_stat": -0.69113073538477,
+    "t_pvalue": 0.49028881767805294,
+    "wilcoxon_pvalue": 0.3678618878402944
+  },
+  "correct_vs_lowlevel_permuted": {
+    "n": 200,
+    "mean_diff": -0.004155495166778564,
+    "std_diff": 0.06060692390237383,
+    "t_stat": -0.9696511957446359,
+    "t_pvalue": 0.33339742812866113,
+    "wilcoxon_pvalue": 0.1424727716267651
+  },
+  "correct_vs_lowlevel_zero": {
+    "n": 200,
+    "mean_diff": -0.04933665722608566,
+    "std_diff": 0.06272700979909103,
+    "t_stat": -11.123209921014595,
+    "t_pvalue": 1.15791077226629e-22,
+    "wilcoxon_pvalue": 1.2361910463293077e-20
+  }
+}

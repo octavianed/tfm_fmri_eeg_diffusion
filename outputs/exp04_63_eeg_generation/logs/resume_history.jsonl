@@ -1,1 +1,0 @@
-{"timestamp": "2026-07-23T18:15:22", "phase": "token_adapter", "checkpoint_path": "outputs\\exp04_63_eeg_generation\\checkpoints\\adapter_last.pt", "resumed_epoch": 12, "resumed_global_step": 22332, "best_loss": 0.1519928576644191}

@@ -1,0 +1,64 @@
+{
+  "macro": {
+    "retrieval": {
+      "top5": 0.08,
+      "mean_rank": 68.435,
+      "n_candidates": 200.0,
+      "n_queries": 200.0,
+      "median_rank": 50.5,
+      "chance_top5": 0.025,
+      "top10": 0.145,
+      "chance_top1": 0.005,
+      "top1": 0.005,
+      "chance_top10": 0.05,
+      "mean_cosine": 0.4225456118583679
+    },
+    "embedding": {
+      "n": 200.0,
+      "r2": -1.1988888284176347,
+      "dim": 768.0,
+      "median_pearson": 0.1015828593925683,
+      "mean_pearson": 0.10728547400082981,
+      "mae": 0.4792693756576195,
+      "mse": 0.4364697567008606,
+      "mean_cosine": 0.4225456432784045
+    }
+  },
+  "subjects": {
+    "sub-01": {
+      "retrieval": {
+        "top1": 0.005,
+        "top5": 0.08,
+        "top10": 0.145,
+        "mean_rank": 68.435,
+        "median_rank": 50.5,
+        "mean_cosine": 0.4225456118583679,
+        "n_queries": 200,
+        "n_candidates": 200,
+        "chance_top1": 0.005,
+        "chance_top5": 0.025,
+        "chance_top10": 0.05
+      },
+      "embedding": {
+        "mse": 0.4364697567008606,
+        "mae": 0.4792693756576195,
+        "mean_cosine": 0.4225456432784045,
+        "r2": -1.1988888284176347,
+        "mean_pearson": 0.10728547400082981,
+        "median_pearson": 0.1015828593925683,
+        "n": 200,
+        "dim": 768
+      },
+      "lowlevel": {
+        "mse": 13.253080545314297,
+        "mae": 1.8307311277547174,
+        "mean_cosine": 0.2066973011858175,
+        "r2": 0.03225612068330608,
+        "mean_pearson": 0.014086988959664523,
+        "median_pearson": 0.011566628470307882,
+        "n": 200,
+        "dim": 512
+      }
+    }
+  }
+}

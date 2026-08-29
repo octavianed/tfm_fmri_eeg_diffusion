@@ -1,0 +1,14 @@
+grupo,linea,n_candidatos,azar_top5_%,exp1_top1_%,exp1_top5_%,exp3_top1_%,exp3_top5_%,exp3_top10_%,exp3_rango_medio,exp3_coseno,lowlevel_r2,lowlevel_pearson,ctrl_permutada_top5_%,ctrl_nula_top5_%,ctrl_ruido_top5_%,media_top5_%,ridge_top5_%,veredicto,razon_sobre_azar
+fMRI,fMRI (NSD),159,3.1447,49.0566,87.4214,47.7987,84.9057,95.5975,3.3899,0.5075,0.2174,0.0496,5.6604,3.1447,3.1447,3.1447,66.6667,fmri_used,27.0
+EEG oficial,Oficial 17 ch,200,2.5,2.0,8.0,0.5,5.0,10.5,80.17,0.4686,-0.0038,0.0111,2.5,2.5,1.0,2.5,8.0,fmri_used,2.0
+EEG oficial,Oficial 63 ch,200,2.5,0.5,4.5,0.5,8.5,16.0,77.335,0.4502,-0.0232,0.0166,3.0,2.5,5.5,2.5,9.0,fmri_used,3.4
+EEG propio,Propio: baseline,200,2.5,0.5,5.5,0.5,4.5,11.5,85.065,0.3656,-0.0377,0.0145,3.5,2.5,3.0,2.5,10.0,fmri_used,1.8
+EEG propio,Propio: temporal 100-600,200,2.5,3.5,12.0,3.0,10.5,19.5,60.25,0.5532,0.0055,0.013,2.5,2.5,2.5,2.5,8.0,fmri_used,4.2
+EEG propio,Propio: temporal 200-400,200,2.5,3.5,10.0,5.0,12.0,17.5,69.48,0.3073,-0.0139,0.0137,3.5,2.5,2.0,2.5,5.5,fmri_used,4.8
+EEG propio,Propio: sin blanqueo,200,2.5,1.5,9.0,1.5,8.0,17.0,70.065,0.6416,0.0025,0.0048,3.0,2.5,3.0,2.5,2.5,fmri_used,3.2
+EEG propio,Propio: 17 canales,200,2.5,1.5,6.5,0.5,8.0,14.5,68.425,0.4225,0.0323,0.0141,2.0,2.5,2.0,2.5,10.0,fmri_used,3.2
+EEG propio,Propio: 100 Hz,200,2.5,2.0,7.0,2.0,7.0,14.0,76.605,0.3622,-0.0176,0.0101,2.0,2.5,1.5,2.5,10.0,fmri_used,2.8
+EEG propio,"Propio: 0,5-40 Hz",200,2.5,1.5,3.5,1.0,4.0,6.5,89.075,0.2667,-0.0787,0.0093,2.5,2.5,2.5,2.5,10.0,fmri_used,1.6
+EEG propio,Propio: referencia CAR,200,2.5,0.5,3.0,1.0,6.5,12.0,87.385,0.3199,-0.0521,0.0157,2.5,2.5,3.0,2.5,9.0,fmri_used,2.6
+EEG propio,Propio: linea base -100,200,2.5,1.0,4.0,1.0,4.5,10.0,87.975,0.3764,-0.0179,0.0127,2.5,2.5,3.0,2.5,9.5,fmri_used,1.8
+EEG propio,Propio: trials sueltos,200,2.5,0.5,2.0,1.0,3.0,6.5,91.705,0.4642,-0.0198,0.0082,3.5,2.5,2.0,2.5,10.0,fmri_not_clearly_used,1.2

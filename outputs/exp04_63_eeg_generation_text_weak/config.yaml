@@ -1,0 +1,183 @@
+project:
+  name: eeg_visual_decoding
+  seed: 42
+paths:
+  data_dir: data
+  processed_dir: data/processed
+  features_dir: data/features
+  splits_dir: data/splits
+  output_dir: outputs
+runtime:
+  device: auto
+  precision: float16
+  deterministic: false
+dataset:
+  modality: eeg
+  name: things_eeg2
+  root_dir: C:/Users/xxdia/Documents/Datasets/THINGS-EEG2
+  subject_selection: sub-01
+  channels: 63
+  time_window_ms: null
+  trial_aggregation:
+    train: none
+    val: mean
+    test: mean
+  val_ratio: 0.1
+  split_seed: 42
+  norm_eps: 1.0e-06
+  captions_dir: null
+features:
+  clip_model: ViT-L-14
+  clip_pretrained: openai
+  clip_hf_name: openai/clip-vit-large-patch14
+  image_size: 224
+  precompute_clip: true
+  precompute_batch_size: 64
+  precompute_vae: true
+  vae_model: stable-diffusion-v1-5/stable-diffusion-v1-5
+  vae_image_size: 512
+  vae_batch_size: 16
+  vae_scaling_factor: 0.18215
+  pca_dim: 512
+model:
+  encoder_type: eeg_temporalconv
+  use_lowlevel: true
+  use_subject_adapter: false
+  eeg_encoder:
+    in_channels: 63
+    in_times: 100
+    hidden_dim: 512
+    output_dim: 2048
+    num_res_blocks: 2
+    dropout: 0.3
+    channel_dropout: 0.1
+    pool: attention
+    kernel_size: 7
+  clip_head:
+    output_dim: 768
+    hidden_dim: null
+    dropout: 0.0
+    final_layernorm: false
+  lowlevel_head:
+    output_dim: 512
+    hidden_dim: null
+    dropout: 0.0
+training:
+  batch_size: 256
+  epochs: 100
+  lr: 5e-5
+  weight_decay: 0.01
+  betas:
+  - 0.9
+  - 0.999
+  scheduler: cosine
+  warmup_ratio: 0.02
+  grad_clip: 1.0
+  mixed_precision: true
+  early_stopping_patience: 15
+  num_workers: 0
+  log_every: 50
+losses:
+  lambda_cosine: 1.0
+  lambda_contrastive: 1.0
+  lambda_lowlevel: 0.25
+  lambda_nmse: 0.0
+  temperature: 0.07
+checkpointing:
+  enabled: true
+  save_last: true
+  save_best: true
+  save_every_n_epochs: 1
+  keep_last_n: 3
+  keep_first_n: 0
+  resume: auto
+  strict_load: true
+  save_rng_state: true
+  monitor: val_top5
+evaluation:
+  conditions:
+  - correct
+  - permuted
+  - zero
+  ridge_alpha: 1000.0
+  noise_std: 1.0
+  infer_batch_size: 256
+generation:
+  sd_model: stable-diffusion-v1-5/stable-diffusion-v1-5
+  adapter_scheduler: cosine
+  adapter_warmup_ratio: 0.05
+  mode: adapter
+  conditioning_architecture: text_adapter_concat
+  text:
+    enabled: true
+    mode: weak
+    template: Image of {caption}
+    caption_field: auto
+    normalize_caption: true
+    permutation_seed: 42
+    permutation_source: derived
+    generic_caption: something
+    max_length: null
+    encode_batch_size: 64
+  fusion:
+    type: concat
+  controlnet:
+    enabled: false
+    model: null
+    condition_type: canny
+    conditioning_scale: 0.5
+    guidance_start: 0.0
+    guidance_end: 1.0
+    training_condition_source: gt_vae_pca_reconstruction
+    canny:
+      sigma: 1.0
+      use_quantiles: true
+      low_threshold: 0.85
+      high_threshold: 0.95
+    depth_model: Intel/dpt-hybrid-midas
+  output_layout: flat
+  allow_incompatible_adapter: false
+  num_inference_steps: 50
+  guidance_scale: 3.0
+  strength: 0.8
+  prompt_mode: empty
+  num_samples: null
+  batch_size: 8
+  seed: 123
+  num_tokens: 8
+  rescale_clip_pred: none
+  adapter_normalize_input: true
+  adapter_input_scale: 1.0
+  enable_attention_slicing: true
+  enable_vae_slicing: true
+  cpu_offload: false
+  load_text_encoder: false
+  train_adapter: true
+  adapter_epochs: 20
+  adapter_batch_size: 8
+  adapter_lr: 0.0002
+  adapter_hidden: 1024
+  adapter_resume: auto
+  adapter_save_every_n_epochs: 5
+  adapter_keep_last_n: 2
+  adapter_keep_first_n: 2
+  adapter_timesteps_per_sample: 1
+  adapter_eval_enabled: true
+  adapter_eval_every_n_epochs: 5
+  adapter_eval_num_samples: 6
+  adapter_eval_steps: 25
+  adapter_eval_split: val
+  adapter_eval_guidance_scale: null
+  adapter_select_by: auto
+  grad_checkpointing: false
+  decoder_checkpoint: outputs/exp03_63_eeg_lowlevel_multitask/checkpoints/best.pt
+  adapter_checkpoint: null
+  split: test
+  conditions:
+  - correct
+  - permuted
+  - zero
+  - permuted_text
+experiment:
+  name: exp04_63_eeg_generation_text_weak
+_config_path: C:\Users\xxdia\Documents\TFM\TFM_REPOS_FINALES\tfm_fmri_eeg_diffusion\configs\EEG\exp04_63_generation_text_weak.yaml

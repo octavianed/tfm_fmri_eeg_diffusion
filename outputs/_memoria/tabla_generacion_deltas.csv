@@ -1,0 +1,32 @@
+config,modalidad,arquitectura,delta,delta_id,valor_pp,p_t,p_wilcoxon,n,atribucion,significativo
+Af,fMRI,A - solo cerebro,D cerebro (correcta - permutada),delta_correct_permuted,10.485831,0.0,0.0,159,limpio,True
+Af,fMRI,A - solo cerebro,D cerebro (correcta - nula),delta_correct_zero,10.26865,0.0,0.0,159,limpio,True
+Bf,fMRI,B - texto + cerebro,D cerebro (correcta - permutada),delta_correct_permuted,10.172487,0.0,0.0,159,limpio,True
+Bf,fMRI,B - texto + cerebro,D cerebro (correcta - nula),delta_correct_zero,11.599027,0.0,0.0,159,limpio,True
+Bf,fMRI,B - texto + cerebro,D texto,delta_text,8.595751,0.0,0.0,159,limpio,True
+Cf,fMRI,C - + ControlNet,D cerebro (correcta - permutada),delta_correct_permuted,4.424816,0.0,0.0,159,conjunto,True
+Cf,fMRI,C - + ControlNet,D cerebro (correcta - nula),delta_correct_zero,5.167464,0.0,0.0,159,conjunto,True
+Cf,fMRI,C - + ControlNet,D texto,delta_text,9.720924,0.0,0.0,159,limpio,True
+Cf,fMRI,C - + ControlNet,D semantica,delta_semantic,4.13412,0.0,0.0,159,limpio,True
+Cf,fMRI,C - + ControlNet,D semantica (nula),delta_semantic_zero,4.288602,0.0,0.0,159,limpio,True
+Cf,fMRI,C - + ControlNet,D estructura,delta_lowlevel,1.11878,0.008429,0.026999,159,limpio,True
+Cf,fMRI,C - + ControlNet,D estructura (nula),delta_lowlevel_zero,-1.636807,0.000341,0.000583,159,limpio,True
+Ae,EEG 63,A - solo cerebro,D cerebro (correcta - permutada),delta_correct_permuted,0.488526,0.089824,0.129042,200,limpio,False
+Ae,EEG 63,A - solo cerebro,D cerebro (correcta - nula),delta_correct_zero,-0.934381,0.02155,0.031272,200,limpio,True
+Be,EEG 63,B - texto + cerebro,D cerebro (correcta - permutada),delta_correct_permuted,1.153268,0.035812,0.030233,200,limpio,True
+Be,EEG 63,B - texto + cerebro,D cerebro (correcta - nula),delta_correct_zero,2.405258,0.004759,0.033137,200,limpio,True
+Be,EEG 63,B - texto + cerebro,D texto,delta_text,7.704632,0.0,0.0,200,limpio,True
+Ce,EEG 63,C - + ControlNet,D cerebro (correcta - permutada),delta_correct_permuted,-0.145306,0.74967,0.930964,200,conjunto,False
+Ce,EEG 63,C - + ControlNet,D cerebro (correcta - nula),delta_correct_zero,-4.557345,0.0,0.0,200,conjunto,True
+Ce,EEG 63,C - + ControlNet,D texto,delta_text,12.829406,0.0,0.0,200,limpio,True
+Ce,EEG 63,C - + ControlNet,D semantica,delta_semantic,0.078701,0.72644,0.998053,200,limpio,False
+Ce,EEG 63,C - + ControlNet,D semantica (nula),delta_semantic_zero,-0.270991,0.490289,0.367862,200,limpio,False
+Ce,EEG 63,C - + ControlNet,D estructura,delta_lowlevel,-0.41555,0.333397,0.142473,200,limpio,False
+Ce,EEG 63,C - + ControlNet,D estructura (nula),delta_lowlevel_zero,-4.933666,0.0,0.0,200,limpio,True
+Ct,EEG 100-600,C - + ControlNet,D cerebro (correcta - permutada),delta_correct_permuted,-0.108619,0.82849,0.420639,200,conjunto,False
+Ct,EEG 100-600,C - + ControlNet,D cerebro (correcta - nula),delta_correct_zero,-5.223119,0.0,0.0,200,conjunto,True
+Ct,EEG 100-600,C - + ControlNet,D texto,delta_text,11.795926,0.0,0.0,200,limpio,True
+Ct,EEG 100-600,C - + ControlNet,D semantica,delta_semantic,-0.295035,0.272909,0.158747,200,limpio,False
+Ct,EEG 100-600,C - + ControlNet,D semantica (nula),delta_semantic_zero,-0.147879,0.708207,0.754764,200,limpio,False
+Ct,EEG 100-600,C - + ControlNet,D estructura,delta_lowlevel,-0.296349,0.522749,0.581279,200,limpio,False
+Ct,EEG 100-600,C - + ControlNet,D estructura (nula),delta_lowlevel_zero,-5.079727,0.0,0.0,200,limpio,True
