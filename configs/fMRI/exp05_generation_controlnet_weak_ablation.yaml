@@ -1,0 +1,13 @@
+# Experiment 5 (fMRI) — comparación generativa de la variante 'controlnet_weak'.
+# Hereda del config de Exp4 para que arquitectura/texto/ControlNet no puedan
+# desalinearse con las imágenes que se están puntuando.
+_base_: [exp04_generation_controlnet_weak.yaml]
+
+experiment:
+  name: exp05_generation_controlnet_weak_ablation
+
+generation:
+  source_experiment: exp04_generation_controlnet_weak
+  compute_ssim: true        # requiere scikit-image
+  compute_lpips: true       # requiere el paquete lpips
+  num_case_examples: 5      # rejillas best / median / worst

@@ -1,0 +1,58 @@
+# Experiment 4 (fMRI) — ARQUITECTURA 2: texto débil + TokenAdapter + ControlNet.
+#
+#   semántica : [ 77 tokens "Image of <prompt_categories>" ; K pseudo-tokens ]  (cross-attention)
+#   estructura: low_pred -> PCA^-1 -> VAE decode -> Canny -> ControlNet congelada (residuos)
+#
+# ControlNet NO sustituye a la concatenación: la complementa (§5.1). Solo se
+# entrena el TokenAdapter; ControlNet, U-Net, VAE, CLIP y text encoder van
+# congelados (§7.1).
+#
+# Orden de ejecución:
+#   python scripts/13_precompute_text_embeddings.py       --config configs/fMRI/exp04_generation_controlnet_weak.yaml
+#   python scripts/14_precompute_controlnet_conditions.py --config configs/fMRI/exp04_generation_controlnet_weak.yaml
+#   python scripts/06_generate_images.py                  --config configs/fMRI/exp04_generation_controlnet_weak.yaml --train-adapter
+#   python scripts/07_eval_generation_ablation.py         --config configs/fMRI/exp05_generation_controlnet_weak_ablation.yaml
+_base_: [exp04_generation_text_weak.yaml]
+
+experiment:
+  name: exp04_generation_controlnet_weak
+
+model:
+  use_lowlevel: true            # el decoder DEBE tener rama low-level (Exp3)
+
+generation:
+  conditioning_architecture: text_adapter_concat_controlnet
+  # 'adapter': la estructura entra por ControlNet (residuos), no por img2img.
+  # 'adapter_lowlevel' también es válido y está probado: añade además la Opción C
+  # (low_pred -> latente -> init de img2img), y entonces el estado estructural de
+  # cada condición gobierna TAMBIÉN el latente inicial. Empieza por 'adapter': así
+  # la única vía estructural es la ControlNet y delta_lowlevel es interpretable.
+  mode: adapter
+  decoder_checkpoint: outputs/exp03_fmri_lowlevel_multitask/checkpoints/best.pt
+
+  # ⚠️ adapter_eval_enabled (heredado) evalúa en el split 'val', así que la caché
+  # de condiciones ControlNet debe cubrirlo:
+  #   python scripts/14_precompute_controlnet_conditions.py --config <este> --splits train val
+  # Si solo cacheas 'train', el entrenamiento aborta nada más arrancar.
+  controlnet:
+    enabled: true
+    model: lllyasviel/sd-controlnet-canny   # compatible con SD-1.5 (cross_dim=768)
+    condition_type: canny
+    conditioning_scale: 0.5
+    guidance_start: 0.0
+    guidance_end: 1.0
+    training_condition_source: gt_vae_pca_reconstruction
+
+  # El adapter de la arquitectura 2 se entrena CON la ControlNet activa (§31):
+  # reutilizar el de la arquitectura 1 solo vale como smoke test.
+  # ⚠️ ControlNet + eval in-loop: batch 8 sin grad_checkpointing pica en 14,2 GiB
+  # de los 15,9 disponibles. Deja grad_checkpointing en true aquí (6,6 GiB) o baja
+  # a adapter_batch_size: 4 (9,1 GiB). Medido en esta GPU.
+  grad_checkpointing: false # probamos antes false, si da OOM bajamos a 4 o activamos grad_checkpointing
+  train_adapter: true
+  adapter_epochs: 25
+
+  # Matriz del §35: joint + ablación de cada rama por separado.
+  conditions: [correct, permuted, zero, permuted_text,
+               semantic_permuted, semantic_zero,
+               lowlevel_permuted, lowlevel_zero]

@@ -1,0 +1,28 @@
+# Experiment 4 (fMRI) — ARQUITECTURA 0: legacy / brain-only.
+#
+# Es la línea de referencia de la ampliación multimodal: exactamente el
+# comportamiento anterior (sin caption, sin tokenizer, sin text encoder, sin
+# ControlNet). Sirve como control de retrocompatibilidad (§41, Test 1) y como
+# baseline contra el que se comparan las arquitecturas 1 y 2.
+#
+#   python scripts/06_generate_images.py --config configs/fMRI/exp04_generation_legacy.yaml --train-adapter
+_base_: [exp04_generation.yaml]
+
+experiment:
+  name: exp04_generation_legacy
+
+generation:
+  conditioning_architecture: legacy_adapter
+  mode: adapter
+  num_tokens: 77                # K histórico de esta línea
+  adapter_normalize_input: true # recomendado (§15): adapter invariante a escala
+  adapter_input_scale: 1.0
+  train_adapter: true
+  adapter_epochs: 25
+  adapter_resume: auto
+  decoder_checkpoint: outputs/exp03_fmri_lowlevel_multitask/checkpoints/best.pt
+  conditions: [correct, permuted, zero]
+
+  adapter_batch_size: 8 # vs los 4 que usamos por lo general. Aprovechamos más VRAM
+  adapter_lr: 2.0e-4  # ~2x el default, porque el batch es 2x (antes era 1e-4 con batch=4)
+  grad_checkpointing: false # +31% de velocidad; con ControlNet vigila la VRAM

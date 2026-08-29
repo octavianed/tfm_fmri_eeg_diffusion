@@ -2,7 +2,7 @@
 _base_: [base.yaml]
 
 experiment:
-  name: exp03_lowlevel_multitask
+  name: exp03_fmri_lowlevel_multitask
 
 model:
   use_lowlevel: true

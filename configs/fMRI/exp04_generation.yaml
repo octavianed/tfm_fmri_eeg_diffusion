@@ -1,27 +1,73 @@
-# Experiment 4 — generation with a frozen Stable Diffusion pipeline.
+# Experiment 4 (fMRI) — generación con Stable Diffusion congelado.
+#
+# ⚠️ Este fichero es la BASE de exp04_generation_{legacy,text_weak,
+# controlnet_weak}.yaml. Todo lo que se ponga aquí lo heredan
+# los cinco adapters que se entrenan para la memoria, así que aquí solo deben
+# vivir los ajustes COMUNES; lo que distingue a cada arquitectura va en su config.
 _base_: [base.yaml]
 
 experiment:
   name: exp04_generation
 
 model:
-  use_lowlevel: true         # multitask decoder is used as the source model
+  use_lowlevel: true         # el decoder de origen es el multitarea (Exp3)
 
 training:
-  early_stopping_patience: 15
+  early_stopping_patience: 15   # solo afecta al decoder; aquí es inocuo
 
 generation:
-  mode: lowlevel_img2img              # adapter | lowlevel_img2img | adapter_lowlevel
-  # Source decoder checkpoint (fMRI -> CLIP/low). Defaults resolved by the
-  # script to exp03 best, then exp01 best, if left null.
-  decoder_checkpoint: null
+  # NOTA: este 'mode' es el histórico de este config suelto. Los cinco configs
+  # de la ampliación lo sobrescriben a 'adapter' (ver la nota en
+  # exp04_generation_text_weak.yaml sobre por qué 'mode' y
+  # 'conditioning_architecture' son ejes independientes).
+  mode: adapter              # adapter | lowlevel_img2img | adapter_lowlevel
+
+  # Decoder de origen (fMRI -> CLIP/low). null => el script lo resuelve buscando
+  # exp03_fmri_lowlevel_multitask y luego exp01_fmri_to_clip. Los configs de la
+  # ampliación lo fijan EXPLÍCITAMENTE para que no dependa de qué haya en disco.
+  decoder_checkpoint: outputs/exp03_fmri_lowlevel_multitask/checkpoints/best.pt
+  # null => outputs/<experiment.name>/checkpoints/adapter_best.pt (el propio).
   adapter_checkpoint: null
-  # Train the (only) trainable module — the token adapter — before generating.
+
+  # --- entrenamiento del TokenAdapter (lo único entrenable) ----------------
   train_adapter: true
   adapter_epochs: 25
   adapter_batch_size: 4
+  # ⚠️ 'auto' reanuda desde adapter_last.pt si existe. Es lo que quieres tras un
+  # corte, pero NO si cambias hiperparámetros (lr, epochs, batch): en ese caso
+  # borra outputs/<exp>/checkpoints/adapter_*.pt o pon adapter_resume: null,
+  # porque si no seguirías entrenando el modelo viejo con la config nueva.
   adapter_resume: auto
-  num_samples: 16
+
+  # La pérdida de difusión de un timestep NO predice la calidad de generación
+  # (docs/03 §6). Con esto, cada N épocas se generan unas imágenes held-out y
+  # adapter_best.pt se elige por similitud CLIP, no por loss. Cuesta unos
+  # minutos por evaluación y evita quedarte con un checkpoint que "baja la
+  # pérdida" pero genera peor.
+  adapter_eval_enabled: true
+  adapter_eval_every_n_epochs: 5
+  adapter_eval_num_samples: 6
+  adapter_eval_steps: 25
+  adapter_eval_split: val
+  adapter_select_by: auto             # auto -> clip_sim porque la eval está on
+
+  # Retención de snapshots del adapter. OJO al disco: con num_tokens=77 (legacy)
+  # cada .pt son ~737 MB (pesos + estados de AdamW), así que 10 snapshots son
+  # ~7,4 GB por experimento; con num_tokens=8 (text/controlnet) son ~85 MB.
+  adapter_save_every_n_epochs: 5
+  adapter_keep_last_n: 2
+  adapter_keep_first_n: 2
+
+  # --- generación ----------------------------------------------------------
+  # Nº de imágenes evaluadas en Exp5. Es el tamaño muestral de los tests
+  # pareados: con 16 apenas hay potencia estadística. El test de subj01 tiene
+  # 159 imágenes; 'null' las usa todas.
+  num_samples: null
+  # Muestras por pasada de la U-Net. Antes NO existía y todas las num_samples
+  # entraban de golpe (x2 por CFG), lo que limitaba num_samples por VRAM.
+  # 8 va sobrado en 17 GB; súbelo si te sobra memoria, bájalo con ControlNet.
+  batch_size: 8
+
   num_inference_steps: 50
   guidance_scale: 3.0
   prompt_mode: empty

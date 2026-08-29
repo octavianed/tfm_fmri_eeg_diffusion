@@ -3,7 +3,7 @@
 _base_: [base.yaml]
 
 experiment:
-  name: exp02_retrieval_ablation
+  name: exp02_fmri_retrieval_ablation
 
 evaluation:
   # Which experiment's best.pt to evaluate (resolved to outputs/<name>/checkpoints/best.pt).

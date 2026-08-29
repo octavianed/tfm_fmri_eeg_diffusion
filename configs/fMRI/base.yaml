@@ -37,6 +37,10 @@ dataset:
   test_ratio: 0.1                # only used when test_split=internal
   split_seed: 42
   norm_eps: 1.0e-6
+  # Folder with the per-subject caption CSVs (multimodal extension). null ->
+  # <root_dir>/auxiliar/generated_captions. Only read when
+  # generation.text.mode != none, so the brain-only line ignores it entirely.
+  captions_dir: null
 
 features:
   clip_model: ViT-L-14          # open_clip name; ViT-L-14/openai -> 768-d
@@ -118,11 +122,60 @@ generation:
   adapter_scheduler: cosine        # o "none" para desactivarlo
   adapter_warmup_ratio: 0.05       # 5% de los pasos totales en warm-up
   mode: adapter                 # adapter | lowlevel_img2img | adapter_lowlevel
+
+  # --- Ampliación multimodal (texto + ControlNet) --------------------------
+  # Arquitectura de condicionamiento. El DEFAULT es la línea histórica:
+  #   legacy_adapter                  -> solo cerebro (sin caption ni ControlNet)
+  #   text_adapter_concat             -> [tokens de texto ; pseudo-tokens] por concat
+  #   text_adapter_concat_controlnet  -> lo anterior + ControlNet congelada low-level
+  # Los checkpoints antiguos del TokenAdapter siguen siendo válidos en legacy.
+  conditioning_architecture: legacy_adapter
+  text:
+    enabled: false
+    mode: none                  # none | weak | oracle
+    template: "Image of {caption}"
+    caption_field: auto         # auto -> fMRI: weak=prompt_categories, oracle=primary_caption
+    normalize_caption: true     # solo espacios/puntuación; nunca reescribe el caption
+    permutation_seed: 42
+    permutation_source: derived # derived (dentro del split, recomendado) | column
+    generic_caption: something  # control "Image of something" (§18.2)
+    max_length: null            # null -> tokenizer.model_max_length (77 en SD-1.5)
+    encode_batch_size: 64
+  fusion:
+    type: concat
+  controlnet:
+    enabled: false
+    model: null                 # p. ej. lllyasviel/sd-controlnet-canny (SD-1.5)
+    condition_type: canny       # canny | depth
+    conditioning_scale: 0.5
+    guidance_start: 0.0
+    guidance_end: 1.0
+    # De dónde sale la condición espacial al ENTRENAR el adapter. La baseline
+    # pasa la imagen real por el mismo cuello de botella VAE-PCA que verá en
+    # inferencia (§8); 'brain_predicted_oof' queda como trabajo futuro.
+    training_condition_source: gt_vae_pca_reconstruction
+    canny:
+      sigma: 1.0
+      use_quantiles: true       # umbrales como cuantiles del gradiente: la
+      low_threshold: 0.85       # reconstrucción PCA es mucho más suave que una
+      high_threshold: 0.95      # foto y umbrales absolutos dejarían el mapa vacío
+    depth_model: Intel/dpt-hybrid-midas
+  # flat  -> generated/<condicion>/            (histórico; Exp5 y notebooks intactos)
+  # nested-> generated/<arquitectura>/<modo>/<condicion>/  (§39)
+  output_layout: flat
+  # Solo para el smoke test del §31 (usar un adapter entrenado con otra
+  # arquitectura). NUNCA para resultados finales.
+  allow_incompatible_adapter: false
   num_inference_steps: 50
   guidance_scale: 3.0
   strength: 0.8
   prompt_mode: empty
   num_samples: 16
+  # Muestras por pasada de la U-Net durante la generación. null = todas de golpe
+  # (comportamiento histórico). Ponlo a 8-16 para poder subir num_samples sin
+  # quedarte sin VRAM: la comparación pareada se conserva porque todas las
+  # condiciones se trocean igual y comparten el mismo generador.
+  batch_size: null
   seed: 123
   num_tokens: 77
   # Calibrate the norm of the PREDICTED CLIP embedding before the adapter.
@@ -137,7 +190,7 @@ generation:
   # uncontrolled conditioning strength. Requires RETRAINING the adapter; the flag
   # is stored in the checkpoint so inference can never mismatch it. Makes
   # rescale_clip_pred (Option A) a no-op.
-  adapter_normalize_input: false
+  adapter_normalize_input: true
   # Conditioning strength when the adapter normalizes its input (training always
   # uses 1.0). Sweep it at inference WITHOUT retraining: a stronger-than-trained
   # scale measurably raised CLIP similarity in this project (see docs/06 §2.3 bis).

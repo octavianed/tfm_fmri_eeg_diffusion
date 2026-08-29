@@ -1,0 +1,65 @@
+# Experiment 4 (fMRI) — ARQUITECTURA 1: prompt textual DÉBIL + TokenAdapter.
+#
+#   condición = [ 77 tokens de "Image of <prompt_categories>" ; K pseudo-tokens ]
+#
+# 'weak' es el baseline textual principal (§9.1.2): da una pista semántica gruesa
+# ("a chair, couch and laptop") sin describir la imagen, de modo que queda margen
+# para que la señal cerebral aporte información (§38).
+#
+# Orden de ejecución:
+#   python scripts/13_precompute_text_embeddings.py --config configs/fMRI/exp04_generation_text_weak.yaml
+#   python scripts/06_generate_images.py            --config configs/fMRI/exp04_generation_text_weak.yaml --train-adapter
+#   python scripts/07_eval_generation_ablation.py   --config configs/fMRI/exp05_generation_text_weak_ablation.yaml
+_base_: [exp04_generation.yaml]
+
+experiment:
+  name: exp04_generation_text_weak
+
+generation:
+  conditioning_architecture: text_adapter_concat
+  # `mode` y `conditioning_architecture` son EJES INDEPENDIENTES y combinables:
+  #   mode: adapter            -> solo semántica (texto + pseudo-tokens). Es lo que
+  #                               se usa aquí para que la arquitectura 1 aísle la
+  #                               contribución semántica y sea comparable con la 2.
+  #   mode: adapter_lowlevel   -> lo anterior + la Opción C (invertir low_pred a un
+  #                               latente e inicializar img2img). Válido y probado:
+  #                               el condicionamiento sigue siendo [texto ; K tokens]
+  #                               y solo cambia el punto de partida del muestreo.
+  #   mode: lowlevel_img2img   -> solo la Opción C.
+  # Ojo al interpretar con adapter_lowlevel: `permuted`/`zero` permutan o anulan a la
+  # vez el CLIP y el low-level (salen del mismo forward), así que delta_brain mide la
+  # contribución CEREBRAL CONJUNTA, no solo la semántica. Para separarlas usa la
+  # arquitectura 2, que tiene condiciones dedicadas (semantic_* / lowlevel_*).
+  mode: adapter
+  decoder_checkpoint: outputs/exp03_fmri_lowlevel_multitask/checkpoints/best.pt
+
+  text:
+    enabled: true
+    mode: weak                  # -> prompt_categories
+    template: "Image of {caption}"
+    caption_field: auto
+    permutation_seed: 42
+
+  fusion:
+    type: concat
+
+  # K pseudo-tokens neuronales. 8 (§4.3) en vez de los 77 del legacy: junto a los
+  # 77 tokens de texto la secuencia queda en 85, y el bloque neuronal no ahoga al
+  # textual. Es un checkpoint DISTINTO del legacy (num_neural_tokens va en los
+  # metadatos del checkpoint y una carga cruzada falla, §14).
+  num_tokens: 8
+  adapter_normalize_input: true # §15: adapter invariante a la norma del CLIP predicho
+  adapter_input_scale: 1.0
+
+  train_adapter: true
+  adapter_epochs: 25
+
+  adapter_batch_size: 8 # vs los 4 que usamos por lo general. Aprovechamos más VRAM
+  adapter_lr: 2.0e-4  # ~2x el default, porque el batch es 2x (antes era 1e-4 con batch=4)
+  grad_checkpointing: false # +31% de velocidad; con ControlNet vigila la VRAM
+
+  adapter_resume: auto
+
+  # correct/permuted/zero cerebral con el caption correcto fijo, más
+  # permuted_text (caption permutado con cerebro correcto) -> delta_text.
+  conditions: [correct, permuted, zero, permuted_text]
