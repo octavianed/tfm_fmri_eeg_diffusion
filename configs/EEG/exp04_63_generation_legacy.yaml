@@ -4,15 +4,13 @@
 _base_: [base_63.yaml]
 
 experiment:
-  name: exp04_63_eeg_generation
-
-model:
-  use_lowlevel: true         # multitask decoder is used as the source model
+  name: exp04_63_eeg_generation_legacy
 
 training:
   early_stopping_patience: 15
 
 generation:
+  conditioning_architecture: legacy_adapter
   mode: adapter                       # adapter | lowlevel_img2img | adapter_lowlevel
   # Source decoder checkpoint (EEG -> CLIP/low). Defaults resolved by the script
   # to exp03 best, then exp01 best, if left null. Point it at the EEG exp03 run:
@@ -21,14 +19,16 @@ generation:
   # Train the (only) trainable module — the token adapter — before generating.
   train_adapter: true
   adapter_epochs: 25
-  adapter_batch_size: 8
-  adapter_lr: 1.0e-4
   adapter_resume: auto
   num_inference_steps: 50
   guidance_scale: 3.0
   prompt_mode: empty
   seed: 123
   split: test
+
+  adapter_batch_size: 8 # vs los 4 que usamos por lo general. Aprovechamos más VRAM
+  adapter_lr: 2.0e-4  # ~2x el default, porque el batch es 2x (antes era 1e-4 con batch=4)
+  grad_checkpointing: false # +31% de velocidad; con ControlNet vigila la VRAM
 
   # La pérdida de difusión de un timestep NO predice la calidad de generación
   # (docs/03 §6). Con esto, cada N épocas se generan unas imágenes held-out y
@@ -57,4 +57,4 @@ generation:
   # entraban de golpe (x2 por CFG), lo que limitaba num_samples por VRAM.
   # 8 va sobrado en 17 GB; súbelo si te sobra memoria, bájalo con ControlNet.
   batch_size: 8
-  grad_checkpointing: false
+  conditions: [correct, permuted, zero]

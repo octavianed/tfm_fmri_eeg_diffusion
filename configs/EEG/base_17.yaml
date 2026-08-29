@@ -40,6 +40,9 @@ dataset:
   val_ratio: 0.1                 # val is carved from the training images (by image)
   split_seed: 42
   norm_eps: 1.0e-6
+  # Carpeta con los CSV de captions (ampliación multimodal). null ->
+  # <root_dir>/image_set/generated_captions. Solo se lee si text.mode != none.
+  captions_dir: null
 
 features:
   clip_model: ViT-L-14          # same CLIP target as the fMRI line -> 768-d
@@ -123,11 +126,52 @@ generation:
   adapter_scheduler: cosine
   adapter_warmup_ratio: 0.05
   mode: adapter                 # adapter | lowlevel_img2img | adapter_lowlevel
+
+  # --- Ampliación multimodal (texto + ControlNet) --------------------------
+  # Arquitectura de condicionamiento. El DEFAULT es la línea histórica:
+  #   legacy_adapter                  -> solo cerebro (sin caption ni ControlNet)
+  #   text_adapter_concat             -> [tokens de texto ; pseudo-tokens] por concat
+  #   text_adapter_concat_controlnet  -> lo anterior + ControlNet congelada low-level
+  conditioning_architecture: legacy_adapter
+  text:
+    enabled: false
+    mode: none                  # none | weak | oracle
+    template: "Image of {caption}"
+    caption_field: auto         # auto -> EEG: weak=oracle=primary_caption (concepto THINGS)
+    normalize_caption: true     # solo espacios/puntuación; nunca reescribe el caption
+    permutation_seed: 42
+    permutation_source: derived # derived (dentro del split, recomendado) | column
+    generic_caption: something  # control "Image of something" (§18.2)
+    max_length: null            # null -> tokenizer.model_max_length (77 en SD-1.5)
+    encode_batch_size: 64
+  fusion:
+    type: concat
+  controlnet:
+    enabled: false
+    model: null                 # p. ej. lllyasviel/sd-controlnet-canny (SD-1.5)
+    condition_type: canny       # canny | depth
+    conditioning_scale: 0.5
+    guidance_start: 0.0
+    guidance_end: 1.0
+    training_condition_source: gt_vae_pca_reconstruction
+    canny:
+      sigma: 1.0
+      use_quantiles: true
+      low_threshold: 0.85
+      high_threshold: 0.95
+    depth_model: Intel/dpt-hybrid-midas
+  output_layout: flat           # flat (histórico) | nested (§39)
+  allow_incompatible_adapter: false
   num_inference_steps: 50
   guidance_scale: 3.0
   strength: 0.8
   prompt_mode: empty
   num_samples: 16
+  # Muestras por pasada de la U-Net durante la generación. null = todas de golpe
+  # (comportamiento histórico). Ponlo a 8-16 para poder subir num_samples sin
+  # quedarte sin VRAM: la comparación pareada se conserva porque todas las
+  # condiciones se trocean igual y comparten el mismo generador.
+  batch_size: null
   seed: 123
   num_tokens: 77
   # Calibrate the norm of the PREDICTED CLIP embedding before the adapter.

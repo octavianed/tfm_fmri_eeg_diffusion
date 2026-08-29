@@ -1,0 +1,30 @@
+# EEG Experiment 4 (raw / variante 'temporal_100_600') — ARQUITECTURA 2: texto + TokenAdapter + ControlNet.
+#
+# Hereda del config de texto de ESTA variante, así que el bloque dataset no puede
+# desalinearse con el decoder. Ni el adapter ni las condiciones de ControlNet
+# dependen del preprocesado del EEG (se derivan de las imágenes y de la PCA), así
+# que se comparten con las demás variantes: solo hay que generar y evaluar.
+_base_: [exp04_raw_temporal_100_600_generation_text_weak.yaml]
+
+experiment:
+  name: exp04_raw_temporal_100_600_eeg_generation_controlnet_weak
+
+model:
+  use_lowlevel: true
+
+generation:
+  conditioning_architecture: text_adapter_concat_controlnet
+  mode: adapter
+  controlnet:
+    enabled: true
+    model: lllyasviel/sd-controlnet-canny
+    condition_type: canny
+    conditioning_scale: 0.5
+    guidance_start: 0.0
+    guidance_end: 1.0
+    training_condition_source: gt_vae_pca_reconstruction
+  train_adapter: false
+  adapter_checkpoint: outputs/exp04_63_eeg_generation_controlnet_weak/checkpoints/adapter_best.pt
+  conditions: [correct, permuted, zero, permuted_text,
+               semantic_permuted, semantic_zero,
+               lowlevel_permuted, lowlevel_zero]

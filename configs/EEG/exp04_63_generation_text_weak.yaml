@@ -1,0 +1,55 @@
+# EEG Experiment 4 (oficial 63ch) — ARQUITECTURA 1: prompt textual + TokenAdapter.
+#
+#   condición = [ 77 tokens de "Image of <concepto THINGS>" ; K pseudo-tokens ]
+#
+# En THINGS-EEG2 el único caption disponible es el nombre del concepto
+# ("Aardvark"), así que ORACLE == WEAK (§10.3): no se entrena un segundo adapter
+# y en las tablas debe indicarse explícitamente esa equivalencia.
+#
+#   python scripts/13_precompute_text_embeddings.py --config configs/EEG/exp04_63_generation_text_weak.yaml
+#   python scripts/06_generate_images.py            --config configs/EEG/exp04_63_generation_text_weak.yaml --train-adapter
+#   python scripts/07_eval_generation_ablation.py   --config configs/EEG/exp05_63_generation_text_weak_ablation.yaml
+_base_: [exp04_63_generation.yaml]
+
+experiment:
+  name: exp04_63_eeg_generation_text_weak
+
+generation:
+  conditioning_architecture: text_adapter_concat
+  # `mode` es un eje INDEPENDIENTE de `conditioning_architecture` y se puede
+  # combinar: `adapter_lowlevel` añade la Opción C (low_pred -> latente -> img2img)
+  # manteniendo el condicionamiento [texto ; K pseudo-tokens]. Aquí se deja en
+  # `adapter` para que la arquitectura 1 aísle la contribución semántica.
+  # Ver configs/fMRI/exp04_generation_text_weak.yaml para la nota completa.
+  mode: adapter
+  decoder_checkpoint: outputs/exp03_63_eeg_lowlevel_multitask/checkpoints/best.pt
+
+  text:
+    enabled: true
+    mode: weak                # -> primary_caption (== oracle en EEG)
+    template: "Image of {caption}"
+    caption_field: auto
+    permutation_seed: 42
+
+  fusion:
+    type: concat
+
+  num_tokens: 8               # K pseudo-tokens neuronales (§4.3)
+  adapter_normalize_input: true
+  adapter_input_scale: 1.0
+
+  train_adapter: true
+  adapter_epochs: 20
+  adapter_resume: auto
+
+  adapter_batch_size: 8 # vs los 4 que usamos por lo general. Aprovechamos más VRAM
+  adapter_lr: 2.0e-4  # ~2x el default, porque el batch es 2x (antes era 1e-4 con batch=4)
+  grad_checkpointing: false # +31% de velocidad; con ControlNet vigila la VRAM
+
+
+  # Todo el split de test (200 imágenes) en vez de 16: es el tamaño muestral de
+  # los tests pareados de Exp5. Posible gracias al troceado por batch_size.
+  num_samples: null
+  batch_size: 8
+
+  conditions: [correct, permuted, zero, permuted_text]

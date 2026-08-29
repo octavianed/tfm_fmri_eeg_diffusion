@@ -1,0 +1,11 @@
+# EEG Experiment 5 (oficial 63ch) — comparación generativa de la variante 'legacy'.
+_base_: [exp04_63_generation_legacy.yaml]
+
+experiment:
+  name: exp05_63_eeg_generation_legacy_ablation
+
+generation:
+  source_experiment: exp04_63_eeg_generation_legacy
+  compute_ssim: true
+  compute_lpips: true
+  num_case_examples: 5

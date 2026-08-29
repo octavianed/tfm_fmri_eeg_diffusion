@@ -1,0 +1,41 @@
+# EEG Experiment 4 (oficial 63ch) — ARQUITECTURA 2: texto + TokenAdapter + ControlNet.
+# Ver configs/fMRI/exp04_generation_controlnet_weak.yaml para el detalle del flujo.
+_base_: [exp04_63_generation_text_weak.yaml]
+
+experiment:
+  name: exp04_63_eeg_generation_controlnet_weak
+
+model:
+  use_lowlevel: true
+
+generation:
+  conditioning_architecture: text_adapter_concat_controlnet
+  # 'adapter': la estructura entra por ControlNet (residuos), no por img2img.
+  # 'adapter_lowlevel' también es válido y está probado: añade además la Opción C
+  # (low_pred -> latente -> init de img2img), y entonces el estado estructural de
+  # cada condición gobierna TAMBIÉN el latente inicial. Empieza por 'adapter': así
+  # la única vía estructural es la ControlNet y delta_lowlevel es interpretable.
+  mode: adapter
+  # ⚠️ adapter_eval_enabled (heredado) evalúa en el split 'val', así que la caché
+  # de condiciones ControlNet debe cubrirlo:
+  #   python scripts/14_precompute_controlnet_conditions.py --config <este> --splits train val
+  # Si solo cacheas 'train', el entrenamiento aborta nada más arrancar.
+  controlnet:
+    enabled: true
+    model: lllyasviel/sd-controlnet-canny
+    condition_type: canny
+    conditioning_scale: 0.5
+    guidance_start: 0.0
+    guidance_end: 1.0
+    training_condition_source: gt_vae_pca_reconstruction
+  # ⚠️ ControlNet + eval in-loop: batch 8 sin grad_checkpointing pica en 14,2 GiB
+  # de los 15,9 disponibles. Deja grad_checkpointing en true aquí (6,6 GiB) o baja
+  # a adapter_batch_size: 4 (9,1 GiB). Medido en esta GPU.
+  grad_checkpointing: false
+  train_adapter: true
+  adapter_epochs: 25
+
+  # Matriz del §35: joint + ablación de cada rama por separado.
+  conditions: [correct, permuted, zero, permuted_text,
+               semantic_permuted, semantic_zero,
+               lowlevel_permuted, lowlevel_zero]

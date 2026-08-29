@@ -1,0 +1,11 @@
+# EEG Experiment 5 (oficial 63ch) — comparación generativa de la variante 'text_weak'.
+_base_: [exp04_63_generation_text_weak.yaml]
+
+experiment:
+  name: exp05_63_eeg_generation_text_weak_ablation
+
+generation:
+  source_experiment: exp04_63_eeg_generation_text_weak
+  compute_ssim: true
+  compute_lpips: true
+  num_case_examples: 5

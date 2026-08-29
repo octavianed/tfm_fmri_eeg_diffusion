@@ -1,0 +1,11 @@
+# EEG Experiment 5 (raw / variante 'temporal_100_600') — comparación generativa con ControlNet.
+_base_: [exp04_raw_temporal_100_600_generation_controlnet_weak.yaml]
+
+experiment:
+  name: exp05_raw_temporal_100_600_eeg_generation_controlnet_weak_ablation
+
+generation:
+  source_experiment: exp04_raw_temporal_100_600_eeg_generation_controlnet_weak
+  compute_ssim: true
+  compute_lpips: true
+  num_case_examples: 5
