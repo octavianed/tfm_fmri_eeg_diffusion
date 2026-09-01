@@ -1,32 +1,35 @@
-# Core
-numpy
-pandas
-scipy
-scikit-learn
-pyyaml
-tqdm
-matplotlib
-Pillow
+# Pinned to the exact versions of the environment used for every result in the
+# thesis (.tfm_fmri_diffusion_3_11, Python 3.11.9). Install with:
+#   pip install -r requirements.txt
+# then install the CUDA torch build matching your driver (see below).
 
-# Deep learning (install the CUDA build of torch that matches your driver:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 )
-#torch>=2.0
-#torchvision
-#torch==2.11.0+cu130
-#torchvision==0.26.0+cu130
+# --- Core ---
+numpy==2.4.4
+pandas==3.0.3
+scipy==1.17.1
+scikit-learn==1.9.0
+PyYAML==6.0.3
+tqdm==4.68.3
+matplotlib==3.11.0
+pillow==12.2.0
 
-# Frozen encoders / generator
-open_clip_torch
-#transformers>=4.30
+# --- Deep learning ---
+# torch is NOT listed here because the right build depends on your CUDA driver.
+# The thesis environment used torch 2.12.1+cu130 / torchvision 0.27.1+cu130:
+#   pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cu130
+# Any torch >= 2.0 with a matching torchvision should also work.
+
+# --- Frozen encoders / generator ---
+open_clip_torch==3.3.0
 transformers==5.6.2
-#diffusers>=0.25
 diffusers==0.37.1
-#accelerate
 accelerate==1.13.0
-#safetensors
 safetensors==0.7.0
+huggingface_hub==1.22.0    # known-good with the diffusers/transformers pins above
 
+# --- Generation metrics (Experiment 5) ---
+scikit-image==0.26.0       # SSIM + Canny (ControlNet conditions)
+lpips==0.1.4               # LPIPS
 
-# Optional generation metrics (Experiment 5)
-scikit-image      # SSIM
-lpips             # LPIPS
+# --- EEG raw preprocessing (scripts/09, src/preprocessing) ---
+mne==1.12.1

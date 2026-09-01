@@ -28,6 +28,8 @@ dependencies = [
 
 [project.optional-dependencies]
 metrics = ["scikit-image", "lpips"]
+eeg = ["mne>=1.6"]          # raw EEG preprocessing pipeline (scripts/09)
+all = ["scikit-image", "lpips", "mne>=1.6"]
 
 [tool.setuptools.packages.find]
 include = ["src*"]
